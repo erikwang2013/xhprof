@@ -28,6 +28,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite
           coverage: none
 
       - name: Build
@@ -61,10 +62,10 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest "https://github.com/php/php-sdk-binary-tools/archive/php-sdk-$env:SDK_VER.zip" -OutFile sdk.zip
-          7z x sdk.zip -o. | Out-Null
+          7z x sdk.zip "-o$($pwd.Path)" -y | Out-Null
           $zip = "php-devel-pack-$env:PHP_VER-nts-Win32-vs17-x64.zip"
           Invoke-WebRequest "https://downloads.php.net/~windows/releases/archives/$zip" -OutFile $zip
-          7z x $zip -o. | Out-Null
+          7z x $zip "-o$($pwd.Path)" -y | Out-Null
           $devel = "php-$env:PHP_VER-devel-vs17-x64"
           Add-Content -Path task.bat -Value @(
             '@echo off',
