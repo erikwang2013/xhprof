@@ -154,6 +154,21 @@ if ($format === 'json') {
   return;
 }
 
+/**
+ * fputcsv() with backslash escaping disabled.
+ *
+ * Passing an empty $escape needs PHP >= 7.4: on 7.2/7.3 fputcsv() rejects it
+ * and returns false without writing the row (the CSV would come out empty).
+ * There the backslash escape stays on, which is what fputcsv() did anyway
+ * before; it only shows up in values carrying a literal backslash.
+ */
+function xhprof_fputcsv($out, $line) {
+  if (PHP_VERSION_ID >= 70400) {
+    return fputcsv($out, $line, ',', '"', '');
+  }
+  return fputcsv($out, $line, ',', '"', '\\');
+}
+
 // CSV: fputcsv keeps function names containing commas/quotes/newlines safe.
 header('Content-Type: text/csv; charset=UTF-8');
 header('Content-Disposition: attachment; filename="'
@@ -177,13 +192,13 @@ fwrite($out, "\xEF\xBB\xBF");
 
 // explicit delimiter/enclosure/escape: the escape default is deprecated
 // and backslash escaping is not part of CSV anyway.
-fputcsv($out, $columns, ',', '"', '');
+xhprof_fputcsv($out, $columns);
 foreach ($flat_data as $row) {
   $line = array();
   foreach ($columns as $column) {
     $line[] = isset($row[$column]) ? $row[$column] : '';
   }
-  fputcsv($out, $line, ',', '"', '');
+  xhprof_fputcsv($out, $line);
 }
 
 // totals row (exclusive columns have no per-run total: leave them empty)
@@ -195,6 +210,6 @@ foreach ($metrics as $metric) {
   $line[] = isset($totals[$metric]) ? $totals[$metric] : '';
   $line[] = '';
 }
-fputcsv($out, $line, ',', '"', '');
+xhprof_fputcsv($out, $line);
 
 fclose($out);
