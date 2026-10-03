@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: [ '7.2', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5', '8.6' ]
+        php: [ '7.2', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5' ]
         experimental: [ false ]
         include:
           # 8.6 尚未 GA（当前为 RC/预览期，本地以 8.6.0RC2 验证通过）。
@@ -50,7 +50,9 @@ jobs:
   # 首次运行通过后可移除 continue-on-error（功能测试仍由 AppVeyor 覆盖）。
   windows:
     name: Windows (PHP 8.4 NTS)
-    runs-on: windows-latest
+    # php-sdk 的启动脚本依赖 wmic，而 windows-latest（Server 2025）已移除它；
+    # windows-2022 仍自带 wmic，故钉在此镜像。
+    runs-on: windows-2022
     continue-on-error: true
     env:
       SDK_VER: '2.3.0'
