@@ -12,7 +12,8 @@ include_once dirname(__FILE__).'/common.php';
 
 xhprof_enable();
 $ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, "https://www.php.net/");
+/* dead end: connection refused immediately, no network access needed */
+curl_setopt($ch, CURLOPT_URL, "http://127.0.0.1:1/dead-end");
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 curl_exec($ch);
 @curl_close($ch); /* deprecated since PHP 8.5, the "@" keeps the notice out of the output */
@@ -27,7 +28,7 @@ echo "\n";
 --EXPECTF--
 main()                                  : ct=       1; wt=*;
 main()==>curl_close                     : ct=       1; wt=*;
-main()==>curl_exec#https://www.php.net/ : ct=       1; wt=*;
+main()==>curl_exec#http://127.0.0.1:1/dead-end: ct=       1; wt=*;
 main()==>curl_getinfo                   : ct=       1; wt=*;
 main()==>curl_init                      : ct=       1; wt=*;
 main()==>curl_setopt                    : ct=       2; wt=*;

@@ -1,0 +1,230 @@
+#!/usr/bin/env php
+<?php
+//
+//  Copyright (c) 2009 Facebook
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+
+/**
+ * Compare two XHProf runs and fail when a function regresses.
+ *
+ * The delta is computed with xhprof_compute_diff() (new - old), the same as
+ * the web diff report. Only inclusive wall time is looked at: a function
+ * regresses when its wt grows by more than --threshold percent of its
+ * baseline (old) value. Functions that only exist in the new run have no
+ * baseline and are listed as "new" but never fail the gate on their own,
+ * their cost shows up in the callers that do get measured.
+ *
+ * usage: xhprof-diff [options] <old> <new>
+ *
+ * exit status: 0 = nothing regressed over the threshold
+ *              1 = at least one function regressed over the threshold
+ *              2 = usage or run loading error
+ */
+
+require_once dirname(dirname(__FILE__)) . '/xhprof_lib/display/xhprof.php';
+
+$usage = "usage: xhprof-diff [options] <old> <new>\n"
+  . "\n"
+  . "  --threshold PCT  fail when a function's wt grows by more than PCT%\n"
+  . "                   of its baseline value (default: 5)\n"
+  . "  --limit N        rows to list (default: 20)\n"
+  . "  --source NAME    run namespace for run ids (default: xhprof)\n"
+  . "  -h, --help\n"
+  . "\n"
+  . "<old> and <new> are run ids (read from XHPROF_OUTPUT_DIR) or paths to\n"
+  . "run files.\n"
+  . "\n"
+  . "Note: two runs of the same code on a busy machine can differ by tens of\n"
+  . "percent, so pick a threshold above the run-to-run variance you see on\n"
+  . "the machine, and compare runs taken under the same conditions.\n";
+
+/**
+ * Read one side of the comparison: a run file if the argument names one,
+ * otherwise a run id.
+ *
+ * @param string $arg     run id or path to a run file
+ * @param string $source  run namespace, for run ids
+ * @param string $label   OUT: how to refer to this run in the output
+ *
+ * @return array raw run data, or null when it could not be loaded
+ */
+function xhprof_diff_load($arg, $source, &$label) {
+  if (is_file($arg)) {
+    $contents = @file_get_contents($arg);
+    if ($contents === false) {
+      return null;
+    }
+    $raw_data = @unserialize($contents, array('allowed_classes' => false));
+    if (!is_array($raw_data)) {
+      return null;
+    }
+    $label = $arg;
+    return xhprof_sanitize_run_data($raw_data);
+  }
+
+  $xhprof_runs_impl = new XHProfRuns_Default();
+  $raw_data = $xhprof_runs_impl->get_run($arg, $source, $description);
+  if (!is_array($raw_data)) {
+    return null;
+  }
+  $label = $arg . ' (source: ' . $source . ')';
+  return $raw_data;
+}
+
+$options = getopt('h', array('threshold:', 'limit:', 'source:', 'help'),
+                  $rest_index);
+
+if (isset($options['h']) || isset($options['help'])) {
+  echo $usage;
+  exit(0);
+}
+
+$args = array_slice($argv, (int)$rest_index);
+if (count($args) != 2) {
+  fwrite(STDERR, $usage);
+  exit(2);
+}
+
+$source = isset($options['source']) ? $options['source'] : 'xhprof';
+
+$threshold = 5.0;
+if (isset($options['threshold'])) {
+  $value = rtrim($options['threshold'], '%');
+  if (!is_numeric($value) || (float)$value < 0) {
+    fwrite(STDERR, "xhprof-diff: --threshold expects a percentage >= 0\n");
+    exit(2);
+  }
+  $threshold = (float)$value;
+}
+
+$limit = 20;
+if (isset($options['limit'])) {
+  if (!is_numeric($options['limit']) || (int)$options['limit'] < 0) {
+    fwrite(STDERR, "xhprof-diff: --limit expects a number >= 0\n");
+    exit(2);
+  }
+  $limit = (int)$options['limit'];
+}
+
+$old_data = xhprof_diff_load($args[0], $source, $old_label);
+$new_data = xhprof_diff_load($args[1], $source, $new_label);
+
+if ($old_data === null || $new_data === null) {
+  fwrite(STDERR, "xhprof-diff: could not load "
+         . ($old_data === null ? $args[0] : $args[1]) . "\n");
+  exit(2);
+}
+
+if (!isset($new_data['main()']['wt']) || !isset($old_data['main()']['wt'])) {
+  fwrite(STDERR, "xhprof-diff: both runs must carry wall time (wt)\n");
+  exit(2);
+}
+
+// per-run inclusive wt, to compare each function against its baseline
+init_metrics($old_data, '', 'wt', false);
+$old_totals = array();
+$old_flat = xhprof_compute_flat_info($old_data, $old_totals);
+
+init_metrics($new_data, '', 'wt', false);
+$new_totals = array();
+$new_flat = xhprof_compute_flat_info($new_data, $new_totals);
+
+// the delta itself, computed the same way as the web diff report
+$diff_data = xhprof_compute_diff($old_data, $new_data);
+init_metrics($diff_data, '', 'wt', true);
+$diff_totals = array();
+$diff_flat = xhprof_compute_flat_info($diff_data, $diff_totals);
+
+$rows = array();
+$failures = array();
+foreach ($diff_flat as $symbol => $info) {
+  $delta = isset($info['wt']) ? $info['wt'] : 0;
+  $old_wt = isset($old_flat[$symbol]['wt']) ? $old_flat[$symbol]['wt'] : 0;
+  $new_wt = isset($new_flat[$symbol]['wt']) ? $new_flat[$symbol]['wt'] : 0;
+
+  $rows[] = array('fn' => $symbol, 'old' => $old_wt, 'new' => $new_wt,
+                  'delta' => $delta);
+
+  if ($delta <= 0 || $old_wt <= 0) {
+    // nothing grew, or there is no baseline to measure the growth against
+    // (a function the old run never called: its cost shows up in its
+    // callers, which the gate does measure).
+    continue;
+  }
+  $growth = 100.0 * $delta / $old_wt;
+  if ($growth > $threshold) {
+    $failures[] = array('fn' => $symbol, 'old' => $old_wt, 'new' => $new_wt,
+                        'delta' => $delta, 'growth' => $growth);
+  }
+}
+
+// biggest regression first; the function name breaks ties so that the output
+// (and the exit code) stay stable between runs.
+$sort_delta = array();
+$sort_fn = array();
+foreach ($rows as $row) {
+  $sort_delta[] = $row['delta'];
+  $sort_fn[] = $row['fn'];
+}
+array_multisort($sort_delta, SORT_DESC, SORT_NUMERIC,
+                $sort_fn, SORT_ASC, SORT_STRING | SORT_FLAG_CASE,
+                $rows);
+
+echo "old: " . $old_label . "\n";
+echo "new: " . $new_label . "\n";
+
+$total_old = isset($old_totals['wt']) ? $old_totals['wt'] : 0;
+$total_new = isset($new_totals['wt']) ? $new_totals['wt'] : 0;
+printf("total wt: %s -> %s (%s)\n", xhprof_count_format($total_old),
+       xhprof_count_format($total_new),
+       ($total_old > 0) ? sprintf('%+.1f%%',
+                                  100.0 * ($total_new - $total_old)
+                                  / $total_old) : 'n/a');
+
+$printed = ($limit > 0) ? min($limit, count($rows)) : count($rows);
+echo "\n" . $printed . " of " . count($rows)
+  . " function(s) with the biggest wt delta:\n\n";
+
+$format = "%-60s %14s %14s %14s %10s\n";
+printf($format, 'fn', 'old wt', 'new wt', 'delta', 'change');
+for ($i = 0; $i < $printed; $i++) {
+  $row = $rows[$i];
+  if ($row['old'] > 0) {
+    $change = sprintf('%+.1f%%', 100.0 * $row['delta'] / $row['old']);
+  } else {
+    $change = ($row['new'] > 0) ? 'new' : '-';
+  }
+  printf($format, $row['fn'], xhprof_count_format($row['old']),
+         xhprof_count_format($row['new']), xhprof_count_format($row['delta']),
+         $change);
+}
+
+if (!count($failures)) {
+  printf("\nOK: no function grew by more than %s%% of its baseline wt\n",
+         rtrim(rtrim(sprintf('%.2f', $threshold), '0'), '.'));
+  exit(0);
+}
+
+printf("\n%d function(s) over the %s%% threshold:\n", count($failures),
+       rtrim(rtrim(sprintf('%.2f', $threshold), '0'), '.'));
+foreach ($failures as $failure) {
+  printf("  %s: %s -> %s (+%.1f%%, %s)\n", $failure['fn'],
+         xhprof_count_format($failure['old']),
+         xhprof_count_format($failure['new']),
+         $failure['growth'],
+         xhprof_count_format($failure['delta']));
+}
+echo "REGRESSION\n";
+exit(1);

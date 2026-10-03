@@ -415,6 +415,59 @@ function sort_cbk($a, $b) {
 }
 
 /**
+ * Sort the flat report rows with array_multisort() instead of the
+ * sort_cbk() userland comparator. On large runs (tens of thousands of
+ * symbols) the C level sort is well over 10x faster.
+ *
+ * Replicates sort_cbk() semantics per column: case insensitive ascending
+ * for "fn", descending for every other column, and on the absolute value
+ * of the metric in diff mode. Rows that tie may come out in any order.
+ *
+ * @param array  $flat_data  rows, each carrying a "fn" key and metric keys
+ * @param int    $limit      when > 0, only the top $limit rows are kept
+ *
+ * @return array sorted (and possibly truncated) rows
+ */
+function xhprof_sort_flat_data($flat_data, $limit = 0) {
+  global $sort_col;
+  global $diff_mode;
+
+  $sort_keys = array_column($flat_data, $sort_col);
+
+  // The sort column can be missing from some rows ($sort_col may be absent
+  // from C++ profiler runs): sort_cbk() treats those as 0, so fill the gaps
+  // to keep the key list aligned with the data rows.
+  if (count($sort_keys) !== count($flat_data)) {
+    $sort_keys = array();
+    foreach ($flat_data as $i => $row) {
+      $sort_keys[$i] = isset($row[$sort_col]) ? $row[$sort_col] : 0;
+    }
+  }
+
+  if ($sort_col == "fn") {
+    // case insensitive ascending sort for function names
+    array_multisort($sort_keys, SORT_ASC, SORT_STRING | SORT_FLAG_CASE,
+                    $flat_data);
+  } else {
+    // descending sort for all others
+    if ($diff_mode) {
+      // if diff mode, sort by absolute value of regression/improvement
+      foreach ($sort_keys as $i => $key) {
+        $sort_keys[$i] = abs($key);
+      }
+    }
+    array_multisort($sort_keys, SORT_DESC, SORT_NUMERIC, $flat_data);
+  }
+
+  // the default view only shows the top rows: don't keep the rest around.
+  if ($limit > 0 && count($flat_data) > $limit) {
+    $flat_data = array_slice($flat_data, 0, $limit);
+  }
+
+  return $flat_data;
+}
+
+/**
  * Get the appropriate description for a statistic
  * (depending upon whether we are in diff report mode
  * or single run report mode).
@@ -530,8 +583,9 @@ function profiler_report ($url_params,
   }
 
   // lookup function typeahead form
-  $links [] = '<input class="function_typeahead" ' .
-              ' type="input" size="40" maxlength="100" />';
+  $links [] = '<input class="function_typeahead" type="input" size="40" ' .
+              'maxlength="100" placeholder="jump to function&hellip;" ' .
+              'style="padding: 3px 6px; border: 1px solid #bdc7d8;" />';
 
   echo xhprof_render_actions($links);
 
@@ -888,6 +942,28 @@ function full_report($url_params, $symbol_tab, $sort, $run1, $run2) {
                     "$base_path/callgraph.php" . "?" . http_build_query($url_params))
         . "</h3></center>");
 
+  if (!$diff_mode) {
+    // Alternative views / exports for a single run. The view already carries
+    // the "run"/"source" params; drop the ones they don't understand.
+    $export_params = xhprof_array_unset(xhprof_array_unset($url_params,
+                                                           'symbol'),
+                                        'all');
+    $links = array();
+    $links[] = xhprof_render_link('Flame Graph (approximate)',
+                                  "$base_path/flamegraph.php?" .
+                                  http_build_query($export_params));
+    foreach (array('json' => 'JSON', 'csv' => 'CSV',
+                   'callgrind' => 'callgrind') as $fmt => $label) {
+      $links[] = xhprof_render_link($label,
+                                    "$base_path/report.php?" .
+                                    http_build_query(
+                                      xhprof_array_set($export_params,
+                                                       'format', $fmt)));
+    }
+    print("<center><small>Export: " . implode(" | ", $links)
+          . "</small></center>");
+  }
+
 
   $flat_data = array();
   foreach ($symbol_tab as $symbol => $info) {
@@ -895,9 +971,6 @@ function full_report($url_params, $symbol_tab, $sort, $run1, $run2) {
     $tmp["fn"] = $symbol;
     $flat_data[] = $tmp;
   }
-  usort($flat_data, 'sort_cbk');
-
-  print("<br>");
 
   if (!empty($url_params['all'])) {
     $all = true;
@@ -906,6 +979,12 @@ function full_report($url_params, $symbol_tab, $sort, $run1, $run2) {
     $all = false;
     $limit = 100;  // display only limited number of rows
   }
+
+  // In the default (non "all") view only the top $limit rows are needed,
+  // so xhprof_sort_flat_data() keeps just those.
+  $flat_data = xhprof_sort_flat_data($flat_data, $limit);
+
+  print("<br>");
 
   $desc = str_replace("<br>", " ", $descriptions[$sort_col]);
 
@@ -969,6 +1048,33 @@ function pc_info($info, $base_ct, $base_info, $parent) {
   }
 }
 
+/**
+ * Return a small inline bar whose width is $info's share (in %) of the
+ * $base_info value, used in the parent/child report to make the relative
+ * weight of each caller/callee visible at a glance.
+ *
+ * The first displayed metric is used (wall time for PHP runs, samples for
+ * C++ profiler runs). Diff mode (and crafted data) can yield negative
+ * values; a bar can't go below zero, so those clamp to an empty bar.
+ */
+function xhprof_pct_bar($info, $base_info) {
+  global $metrics;
+
+  if (empty($metrics)) {
+    return '';
+  }
+
+  $metric = $metrics[0];
+  $base = isset($base_info[$metric]) ? $base_info[$metric] : 0;
+  $val = isset($info[$metric]) ? $info[$metric] : 0;
+
+  $pct = ($base != 0) ? (100 * $val / abs($base)) : 0;
+  $pct = max(0, min(100, $pct));
+
+  return '<div class="pctbar"><div class="pctbar_fill" style="width:'
+         . round($pct) . '%"></div></div>';
+}
+
 function print_pc_array($url_params, $results, $base_ct, $base_info, $parent,
                         $run1, $run2) {
   global $base_url;
@@ -1005,6 +1111,7 @@ function print_pc_array($url_params, $results, $base_ct, $base_info, $parent,
 
     print("<td>" . xhprof_render_link(htmlspecialchars($info["fn"]), $href));
     print_source_link($info);
+    print(xhprof_pct_bar($info, $base_info));
     print("</td>");
     pc_info($info, $base_ct, $base_info, $parent);
     print("</tr>");
@@ -1190,10 +1297,13 @@ function symbol_report($url_params,
   print("<b><i><center>Current Function</center></i></b>");
   print("</td></tr>");
 
-  print("<tr>");
+  // highlight the row of the function being reported on
+  print("<tr class='current_function'>");
   // make this a self-reference to facilitate copy-pasting snippets to e-mails
   print("<td><a href=''>" . htmlspecialchars($rep_symbol) . "</a>");
   print_source_link(array('fn' => $rep_symbol));
+  print('<div class="pctbar"><div class="pctbar_fill" style="width:100%">'
+        . '</div></div>');
   print("</td>");
 
   if ($display_calls) {

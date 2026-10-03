@@ -59,18 +59,32 @@ ZEND_DECLARE_MODULE_GLOBALS(xhprof)
  */
 
 /* {{{ arginfo */
+#if PHP_VERSION_ID >= 80000
+# define XHPROF_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(pass_by_ref, name, type_hint, allow_null, default_value) \
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(pass_by_ref, name, type_hint, allow_null, default_value)
+#else
+/* PHP < 8 arginfo has no default value for parameters */
+# define XHPROF_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(pass_by_ref, name, type_hint, allow_null, default_value) \
+    ZEND_ARG_TYPE_INFO(pass_by_ref, name, type_hint, allow_null)
+#endif
+
+/* The enable functions return NULL on success, but false when profiling is
+ * turned off (xhprof.profiler=0), so no return type can be declared without
+ * turning that documented error path into a TypeError. */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_xhprof_enable, 0, 0, 0)
-  ZEND_ARG_INFO(0, flags)
-  ZEND_ARG_INFO(0, options)
+  XHPROF_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, flags, IS_LONG, 0, "0")
+  XHPROF_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, options, IS_ARRAY, 1, "null")
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO(arginfo_xhprof_disable, 0)
+/* Returns NULL (not an array) when profiling was never started */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_xhprof_disable, 0, 0, IS_ARRAY, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO(arginfo_xhprof_sample_enable, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO(arginfo_xhprof_sample_disable, 0)
+/* Returns NULL (not an array) when profiling was never started */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_xhprof_sample_disable, 0, 0, IS_ARRAY, 1)
 ZEND_END_ARG_INFO()
 /* }}} */
 
@@ -134,6 +148,25 @@ STD_PHP_INI_ENTRY("xhprof.sampling_interval", STRINGIFY(XHPROF_DEFAULT_SAMPLING_
  * Depth to trace call-chain by the sampling profiler
  */
 STD_PHP_INI_ENTRY("xhprof.sampling_depth", STRINGIFY(INT_MAX), PHP_INI_ALL, OnUpdateLong, sampling_depth, zend_xhprof_globals, xhprof_globals)
+
+/* profiler:
+ * Master switch. When 0 the fcall observer / execute hooks are not installed
+ * at all, so an idle request has exactly the same overhead as without the
+ * extension loaded. xhprof_enable() and xhprof_sample_enable() then fail with
+ * a warning instead of returning a profile that only contains "main()".
+ */
+STD_PHP_INI_ENTRY("xhprof.profiler", "1", PHP_INI_SYSTEM, OnUpdateBool, profiler, zend_xhprof_globals, xhprof_globals)
+
+/* auto_enable:
+ * Start hierarchical profiling at request startup, without calling
+ * xhprof_enable() from the script. Requires xhprof.profiler=1.
+ */
+STD_PHP_INI_ENTRY("xhprof.auto_enable", "0", PHP_INI_SYSTEM, OnUpdateBool, auto_enable, zend_xhprof_globals, xhprof_globals)
+
+/* auto_enable_flags:
+ * Flags used by xhprof.auto_enable (e.g. XHPROF_FLAGS_CPU|XHPROF_FLAGS_MEMORY)
+ */
+STD_PHP_INI_ENTRY("xhprof.auto_enable_flags", "0", PHP_INI_SYSTEM, OnUpdateLong, auto_enable_flags, zend_xhprof_globals, xhprof_globals)
 PHP_INI_END()
 
 /* Init module */
@@ -171,7 +204,12 @@ PHP_FUNCTION(xhprof_enable)
 
     hp_get_ignored_functions_from_arg(optional_array);
 
-    hp_begin(XHPROF_MODE_HIERARCHICAL, xhprof_flags);
+    if (!hp_begin(XHPROF_MODE_HIERARCHICAL, xhprof_flags)) {
+        /* Failing loudly beats handing out a profile that only contains the
+         * fictitious "main()" frame */
+        php_error_docref(NULL, E_WARNING, "profiling is disabled (xhprof.profiler=0)");
+        RETURN_FALSE;
+    }
 }
 
 /**
@@ -201,7 +239,11 @@ PHP_FUNCTION(xhprof_sample_enable)
 {
     zend_long xhprof_flags = 0;    /* XHProf flags */
     hp_get_ignored_functions_from_arg(NULL);
-    hp_begin(XHPROF_MODE_SAMPLED, xhprof_flags);
+
+    if (!hp_begin(XHPROF_MODE_SAMPLED, xhprof_flags)) {
+        php_error_docref(NULL, E_WARNING, "profiling is disabled (xhprof.profiler=0)");
+        RETURN_FALSE;
+    }
 }
 
 /**
@@ -233,6 +275,14 @@ static void php_xhprof_init_globals(zend_xhprof_globals *xhprof_globals)
     xhprof_globals->sampling_interval = XHPROF_DEFAULT_SAMPLING_INTERVAL;
     xhprof_globals->sampling_depth = INT_MAX;
 
+    /* REGISTER_INI_ENTRIES() overwrites these with the configured values */
+    xhprof_globals->profiler = 1;
+    xhprof_globals->auto_enable = 0;
+    xhprof_globals->auto_enable_flags = 0;
+
+    xhprof_globals->sample_buf = NULL;
+    xhprof_globals->sample_buf_len = 0;
+
     ZVAL_UNDEF(&xhprof_globals->stats_count);
 
     /* no free hp_entry_t structures to start with */
@@ -256,31 +306,45 @@ static void php_xhprof_init_globals(zend_xhprof_globals *xhprof_globals)
  */
 PHP_MINIT_FUNCTION(xhprof)
 {
+#if defined(ZTS) && defined(COMPILE_DL_XHPROF)
+    /* MINIT touches the module globals (the INI handlers below and the
+     * xhprof.profiler check) before any RINIT has run on this thread, so the
+     * static TSRMLS cache has to be primed here as well. No-op in NTS builds. */
+    ZEND_TSRMLS_CACHE_UPDATE();
+#endif
+
     ZEND_INIT_MODULE_GLOBALS(xhprof, php_xhprof_init_globals, NULL);
 
     REGISTER_INI_ENTRIES();
 
     hp_register_constants(INIT_FUNC_ARGS_PASSTHRU);
 
-    /* Replace zend_compile with our proxy */
-    _zend_compile_file = zend_compile_file;
-    zend_compile_file  = hp_compile_file;
+    /* The proxies and the fcall observer below are the only instrumentation
+     * xhprof adds.  With xhprof.profiler=0 (PHP_INI_SYSTEM, so this decision
+     * holds for the whole process) none of them is installed and profiling
+     * cannot be started, which makes an idle request exactly as cheap as
+     * running without the extension. */
+    if (XHPROF_G(profiler)) {
+        /* Replace zend_compile with our proxy */
+        _zend_compile_file = zend_compile_file;
+        zend_compile_file  = hp_compile_file;
 
-    /* Replace zend_compile_string with our proxy */
-    _zend_compile_string = zend_compile_string;
-    zend_compile_string = hp_compile_string;
+        /* Replace zend_compile_string with our proxy */
+        _zend_compile_string = zend_compile_string;
+        zend_compile_string = hp_compile_string;
 
 #if PHP_VERSION_ID >= 80000
-    zend_observer_fcall_register(tracer_observer);
+        zend_observer_fcall_register(tracer_observer);
 #else
-    /* Replace zend_execute with our proxy */
-    _zend_execute_ex = zend_execute_ex;
-    zend_execute_ex  = hp_execute_ex;
+        /* Replace zend_execute with our proxy */
+        _zend_execute_ex = zend_execute_ex;
+        zend_execute_ex  = hp_execute_ex;
 #endif
 
-    /* Replace zend_execute_internal with our proxy */
-    _zend_execute_internal = zend_execute_internal;
-    zend_execute_internal = hp_execute_internal;
+        /* Replace zend_execute_internal with our proxy */
+        _zend_execute_internal = zend_execute_internal;
+        zend_execute_internal = hp_execute_internal;
+    }
 
 #if defined(DEBUG)
     /* To make it random number generator repeatable to ease testing. */
@@ -301,13 +365,17 @@ PHP_MSHUTDOWN_FUNCTION(xhprof)
     /* free any remaining items in the free list */
     hp_free_the_free_list();
 
+    /* Mirror the xhprof.profiler gate in MINIT: nothing was installed if the
+     * profiler is disabled, so nothing must be restored either */
+    if (XHPROF_G(profiler)) {
 #if PHP_VERSION_ID < 80000
-    /* Remove proxies, restore the originals */
-    zend_execute_ex       = _zend_execute_ex;
+        /* Remove proxies, restore the originals */
+        zend_execute_ex       = _zend_execute_ex;
 #endif
-    zend_execute_internal = _zend_execute_internal;
-    zend_compile_file     = _zend_compile_file;
-    zend_compile_string   = _zend_compile_string;
+        zend_execute_internal = _zend_execute_internal;
+        zend_compile_file     = _zend_compile_file;
+        zend_compile_string   = _zend_compile_string;
+    }
 
     UNREGISTER_INI_ENTRIES();
 
@@ -324,6 +392,14 @@ PHP_RINIT_FUNCTION(xhprof)
 #endif
 
     XHPROF_G(timebase_conversion) = get_timebase_conversion();
+
+    /* xhprof.auto_enable: start profiling without an explicit xhprof_enable()
+     * call. hp_begin() is idempotent, so a manual xhprof_enable() afterwards
+     * is a no-op and the INI configured flags win. With xhprof.profiler=0
+     * hp_begin() refuses and nothing is profiled. */
+    if (XHPROF_G(auto_enable)) {
+        hp_begin(XHPROF_MODE_HIERARCHICAL, XHPROF_G(auto_enable_flags));
+    }
 
     return SUCCESS;
 }
@@ -342,9 +418,47 @@ PHP_RSHUTDOWN_FUNCTION(xhprof)
  */
 PHP_MINFO_FUNCTION(xhprof)
 {
+    char level[32];
+    char count[16];
+    int ignored = 0;
+    const char *mode;
+
+    /* Only report a profiler level when the profiler ever ran in this
+     * request; "n/a" otherwise. */
+    if (XHPROF_G(ever_enabled)) {
+        switch (XHPROF_G(profiler_level)) {
+            case XHPROF_MODE_HIERARCHICAL:
+                mode = "hierarchical";
+                break;
+            case XHPROF_MODE_SAMPLED:
+                mode = "sampled";
+                break;
+            default:
+                mode = "unknown";
+                break;
+        }
+        snprintf(level, sizeof(level), "%d (%s)", XHPROF_G(profiler_level), mode);
+    } else {
+        snprintf(level, sizeof(level), "n/a");
+    }
+
+    /* Bounded by XHPROF_MAX_IGNORED_FUNCTIONS: short walk, no long chains */
+    if (XHPROF_G(ignored_functions)) {
+        while (ignored < XHPROF_MAX_IGNORED_FUNCTIONS
+               && XHPROF_G(ignored_functions)->names[ignored] != NULL) {
+            ignored++;
+        }
+    }
+    snprintf(count, sizeof(count), "%d", ignored);
+
     php_info_print_table_start();
-    php_info_print_table_header(2, "xhprof support", "enabled");
+    php_info_print_table_header(2, "xhprof support", XHPROF_G(profiler) ? "enabled" : "disabled");
     php_info_print_table_row(2, "Version", XHPROF_VERSION);
+    php_info_print_table_row(2, "Profiler enabled (this request)", XHPROF_G(enabled) ? "yes" : "no");
+    php_info_print_table_row(2, "Profiler level", level);
+    php_info_print_table_row(2, "Ignored functions", count);
+    php_info_print_table_row(2, "Additional info callbacks", XHPROF_G(trace_callbacks) ? "registered" : "none");
+    php_info_print_table_row(2, "Reusable entries on free list", XHPROF_G(entry_free_list) ? "available" : "none");
     php_info_print_table_end();
     DISPLAY_INI_ENTRIES();
 }
@@ -544,9 +658,51 @@ void hp_clean_profiler_state()
         XHPROF_G(root) = NULL;
     }
 
+    if (XHPROF_G(sample_buf)) {
+        efree(XHPROF_G(sample_buf));
+        XHPROF_G(sample_buf) = NULL;
+        XHPROF_G(sample_buf_len) = 0;
+    }
+
     /* Delete the array storing ignored function names */
     hp_ignored_functions_clear(XHPROF_G(ignored_functions));
     XHPROF_G(ignored_functions) = NULL;
+}
+
+/* Delimiter between two frames of a stack symbol */
+#define    HP_STACK_DELIM        "==>"
+#define    HP_STACK_DELIM_LEN    (sizeof(HP_STACK_DELIM) - 1)
+
+/**
+ * Length of the "@<recurse level>" suffix of a function name.
+ * rlvl_hprof is a recursion depth, so it is never negative.
+ */
+static size_t hp_rlvl_len(int rlvl)
+{
+    zend_ulong value = (zend_ulong)rlvl;
+    size_t len = 2;  /* '@' plus at least one digit */
+
+    while (value >= 10) {
+        len++;
+        value /= 10;
+    }
+
+    return len;
+}
+
+/**
+ * Report (at most once per process) that a symbol did not fit into its
+ * buffer. Distinct long function names would otherwise be silently merged
+ * into a single profile entry, so this must not go unnoticed.
+ */
+static void hp_warn_truncated_symbol(void)
+{
+    static int warned = 0;
+
+    if (!warned) {
+        warned = 1;
+        php_error_docref(NULL, E_WARNING, "function symbol exceeds the profiling buffer and was truncated; profile entries may be merged");
+    }
 }
 
 /**
@@ -557,19 +713,87 @@ void hp_clean_profiler_state()
  */
 size_t hp_get_entry_name(hp_entry_t *entry, char *result_buf, size_t result_len)
 {
-    size_t len;
+    const char *name = ZSTR_VAL(entry->name_hprof);
+    size_t name_len = ZSTR_LEN(entry->name_hprof);
 
     /* Add '@recurse_level' if required */
-    /* NOTE:  Dont use snprintf's return val as it is compiler dependent */
     if (entry->rlvl_hprof) {
-        len = snprintf(result_buf, result_len, "%s@%d", ZSTR_VAL(entry->name_hprof), entry->rlvl_hprof);
-    } else {
-        len = snprintf(result_buf, result_len, "%s", ZSTR_VAL(entry->name_hprof));
+        size_t suffix_len = hp_rlvl_len(entry->rlvl_hprof);
+
+        if (result_len < name_len + suffix_len + 1) {
+            hp_warn_truncated_symbol();
+            /* NOTE:  Dont use snprintf's return val as it is compiler dependent */
+            return (size_t)snprintf(result_buf, result_len, "%s@%d", name, entry->rlvl_hprof);
+        }
+#if PHP_VERSION_ID >= 80000
+        /* zend_print_long_to_buf() writes the digits backwards ending at the
+         * given pointer, so format them into the tail of the buffer and move
+         * them right behind the "@" (memmove: the ranges may overlap) */
+        char *tail = result_buf + result_len - 1;
+        char *digits = zend_print_long_to_buf(tail, (zend_long)entry->rlvl_hprof);
+        size_t digits_len = (size_t)(tail - digits);
+
+        memcpy(result_buf, name, name_len);
+        result_buf[name_len] = '@';
+        memmove(result_buf + name_len + 1, digits, digits_len);
+        result_buf[name_len + 1 + digits_len] = '\0';
+
+        return name_len + 1 + digits_len;
+#else
+        /* PHP 7 has no zend_print_long_to_buf() in zend_operators.h */
+        return (size_t)snprintf(result_buf, result_len, "%s@%d", name, entry->rlvl_hprof);
+#endif
     }
 
-    return len;
+    if (name_len >= result_len) {
+        /* Keep snprintf's truncating semantics for undersized buffers, but
+         * make the loss visible */
+        hp_warn_truncated_symbol();
+        if (result_len) {
+            memcpy(result_buf, name, result_len - 1);
+            result_buf[result_len - 1] = '\0';
+        }
+        return name_len;
+    }
+
+    /* Common case (no recursion): a plain copy, no format string parsing */
+    memcpy(result_buf, name, name_len + 1);
+
+    return name_len;
 }
 
+
+/**
+ * Returns the number of bytes (excluding the terminating NUL) that
+ * hp_get_function_stack() needs for the given stack level. Callers size
+ * their buffer with this so that the symbol always fits: with a fixed size
+ * buffer, two different long function names were truncated to the same
+ * symbol and their profile entries were merged.
+ *
+ * @author kannan, veeve
+ */
+static size_t hp_get_function_stack_length(hp_entry_t *entry, int level)
+{
+    size_t ancestors_len;
+    size_t len = ZSTR_LEN(entry->name_hprof);
+
+    /* '@<recurse level>' suffix, if any */
+    if (entry->rlvl_hprof) {
+        len += hp_rlvl_len(entry->rlvl_hprof);
+    }
+
+    /* End recursion if we dont need deeper levels or we dont have any deeper
+    * levels */
+    if (!entry->prev_hprof || (level <= 1)) {
+        return len;
+    }
+
+    /* Take care of all ancestors first */
+    ancestors_len = hp_get_function_stack_length(entry->prev_hprof, level - 1);
+
+    /* The delimiter is only written if the ancestors produced something */
+    return ancestors_len ? ancestors_len + HP_STACK_DELIM_LEN + len : len;
+}
 
 /**
  * Build a caller qualified name for a callee.
@@ -598,12 +822,12 @@ size_t hp_get_function_stack(hp_entry_t *entry, int level, char *result_buf, siz
     /* Take care of all ancestors first */
     len = hp_get_function_stack(entry->prev_hprof, level - 1, result_buf, result_len);
 
-    /* Append the delimiter */
-# define    HP_STACK_DELIM        "==>"
-# define    HP_STACK_DELIM_LEN    (sizeof(HP_STACK_DELIM) - 1)
-
-    if (result_len < (len + HP_STACK_DELIM_LEN)) {
+    /* The "+ 1" accounts for the NUL: strncat() appends at most
+     * result_len - len - 1 bytes.  Callers size result_buf with
+     * hp_get_function_stack_length(), so bailing out should not happen. */
+    if (result_len < (len + HP_STACK_DELIM_LEN + 1)) {
         /* Insufficient result_buf. Bail out! */
+        hp_warn_truncated_symbol();
         return len;
     }
 
@@ -612,9 +836,6 @@ size_t hp_get_function_stack(hp_entry_t *entry, int level, char *result_buf, siz
         strncat(result_buf + len, HP_STACK_DELIM, result_len - len);
         len += HP_STACK_DELIM_LEN;
     }
-
-# undef     HP_STACK_DELIM_LEN
-# undef     HP_STACK_DELIM
 
     /* Append the current function name */
     return len + hp_get_entry_name(entry, result_buf + len, result_len - len);
@@ -733,15 +954,28 @@ void hp_trunc_time(struct timeval *tv, zend_ulong intr)
 void hp_sample_stack(hp_entry_t  **entries)
 {
     char key[SCRATCH_BUF_LEN];
-    char symbol[SCRATCH_BUF_LEN * 1000];
+    size_t symbol_len;
 
     /* Build key */
     snprintf(key, sizeof(key), "%d.%06d", (uint32) XHPROF_G(last_sample_time).tv_sec, (uint32) XHPROF_G(last_sample_time).tv_usec);
 
-    /* Init stats in the global stats_count hashtable */
-    hp_get_function_stack(*entries, XHPROF_G(sampling_depth), symbol, sizeof(symbol));
+    /* A fixed 512KB C stack buffer used to live here; use a per request heap
+     * buffer instead, sized for the symbol that is about to be built (a fixed
+     * buffer silently merged distinct long function names) */
+    symbol_len = hp_get_function_stack_length(*entries, XHPROF_G(sampling_depth)) + 1;
 
-    add_assoc_string(&XHPROF_G(stats_count), key, symbol);
+    if (symbol_len > XHPROF_G(sample_buf_len)) {
+        if (XHPROF_G(sample_buf)) {
+            efree(XHPROF_G(sample_buf));
+        }
+        XHPROF_G(sample_buf) = emalloc(symbol_len);
+        XHPROF_G(sample_buf_len) = symbol_len;
+    }
+
+    /* Init stats in the global stats_count hashtable */
+    hp_get_function_stack(*entries, XHPROF_G(sampling_depth), XHPROF_G(sample_buf), symbol_len);
+
+    add_assoc_string(&XHPROF_G(stats_count), key, XHPROF_G(sample_buf));
 }
 
 /**
@@ -940,7 +1174,9 @@ void hp_mode_hier_endfn_cb(hp_entry_t **entries)
 {
     hp_entry_t      *top = (*entries);
     zval            *counts;
-    char            symbol[SCRATCH_BUF_LEN];
+    char             stack_buf[4096];
+    char            *symbol = stack_buf;
+    size_t           symbol_len;
     long int        mu_end;
     long int        pmu_end;
     double          wt, cpu;
@@ -956,15 +1192,22 @@ void hp_mode_hier_endfn_cb(hp_entry_t **entries)
     /* Get end tsc counter */
     wt = cycle_timer() - top->tsc_start;
 
-    /* Get the stat array */
-    hp_get_function_stack(top, 2, symbol, sizeof(symbol));
+    /* Build the "caller==>callee" symbol.  Most symbols fit into stack_buf;
+     * long ones get an exactly sized heap buffer instead of being truncated
+     * (truncation merged distinct long function names into one entry). */
+    symbol_len = hp_get_function_stack_length(top, 2);
+    if (symbol_len + 1 > sizeof(stack_buf)) {
+        symbol = emalloc(symbol_len + 1);
+    }
+    hp_get_function_stack(top, 2, symbol, symbol_len + 1);
 
-    counts = zend_hash_str_find(Z_ARRVAL(XHPROF_G(stats_count)), symbol, strlen(symbol));
+    /* Get the stat array */
+    counts = zend_hash_str_find(Z_ARRVAL(XHPROF_G(stats_count)), symbol, symbol_len);
 
     if (counts == NULL) {
         zval count_val;
         array_init(&count_val);
-        counts = zend_hash_str_update(Z_ARRVAL(XHPROF_G(stats_count)), symbol, strlen(symbol), &count_val);
+        counts = zend_hash_str_update(Z_ARRVAL(XHPROF_G(stats_count)), symbol, symbol_len, &count_val);
     }
 
     /* Bump stats in the counts hashtable */
@@ -989,6 +1232,10 @@ void hp_mode_hier_endfn_cb(hp_entry_t **entries)
     }
 
     XHPROF_G(func_hash_counters[top->hash_code])--;
+
+    if (symbol != stack_buf) {
+        efree(symbol);
+    }
 }
 
 /**
@@ -1202,8 +1449,15 @@ ZEND_DLEXPORT zend_op_array* hp_compile_string(zend_string *source_string, const
  * It replaces all the functions like zend_execute, zend_execute_internal,
  * etc that needs to be instrumented with their corresponding proxies.
  */
-static void hp_begin(zend_long level, zend_long xhprof_flags)
+static int hp_begin(zend_long level, zend_long xhprof_flags)
 {
+    /* xhprof.profiler=0: no instrumentation was installed, so there is
+     * nothing to profile. Refusing here (rather than starting a profiler
+     * that only ever sees "main()") is what makes the setting honest. */
+    if (!XHPROF_G(profiler)) {
+        return 0;
+    }
+
     if (!XHPROF_G(enabled)) {
         XHPROF_G(enabled)      = 1;
         XHPROF_G(xhprof_flags) = (uint32)xhprof_flags;
@@ -1238,6 +1492,8 @@ static void hp_begin(zend_long level, zend_long xhprof_flags)
         /* start profiling from fictitious main() */
         begin_profiling(XHPROF_G(root), NULL);
     }
+
+    return 1;
 }
 
 /**

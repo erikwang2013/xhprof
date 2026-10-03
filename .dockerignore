@@ -1,0 +1,28 @@
+# VCS / CI
+.git
+.github
+.gitignore
+.appveyor.yml
+
+# Local agent/runtime state
+.claude
+.claude-flow
+.codex
+.agents
+.swarm
+.mcp.json
+ruvector.db
+
+# Local build leftovers and package artifacts
+extension/autom4te.cache
+extension/build
+extension/.libs
+extension/modules
+extension/*.o
+extension/*.lo
+extension/*.dep
+extension/Makefile
+extension/config.log
+extension/config.status
+*.tgz
+*.tar.gz

@@ -8,6 +8,11 @@ XHProf 是 PHP 的函数级分层分析器，带有简洁的、基于 HTML 的�
 
 本版本支持 PHP7 与 PHP8。
 
+# 为什么选择 xhprof
+- 发布在 PECL 上，报表 UI、分层 DIFF 报表与聚合工具都保留在仓库内。
+- 原 Facebook 项目与 Tideways 的 `php-xhprof-extension` 分支均已归档，二者都指向本仓库，PHP 手册也链接到本分支。
+- 全程本地运行：剖析数据只写入你自己的 `xhprof.output_dir`，不会外发；同时记录精确的调用次数与确定的 wall/CPU/内存数值，并提供采样分析器给不了的 diff 与聚合报表。
+
 # PHP 版本
 - 7.2
 - 7.4
@@ -20,6 +25,13 @@ XHProf 是 PHP 的函数级分层分析器，带有简洁的、基于 HTML 的�
 - 8.6（预发布期；已用 8.6.0RC2 完成构建并通过全量测试）
 
 # 安装
+
+## Docker 快速开始
+无需本地 PHP 工具链，一条命令完成扩展编译并启动报表 UI：
+```sh
+docker compose up
+```
+随后打开 <http://localhost:8080>。容器启动时会自动预跑一条示例 run（`examples/sample.php`），run 数据存放在 `/tmp/xhprof`。
 
 ## 通过 PECL 安装
 ```sh
@@ -49,6 +61,9 @@ xhprof.output_dir = /tmp/xhprof
 |xhprof.sampling_interval  | 100000 | >= v2.* |采样分析器使用的采样间隔，单位为微秒|
 |xhprof.sampling_depth  | INT_MAX | >= v2.* |采样分析器追踪调用链的最大深度|
 |xhprof.collect_additional_info  | 0 | >= v2.1 |采集 mysql_query、curl_exec 的内部信息。默认值为 0，开启值为 1|
+|xhprof.profiler  | 1 | >= v2.3.12 |System（只能写 php.ini / `-d`）。设为 0 时扩展仍加载但不注册任何 observer/proxy：空闲开销回落到未加载扩展的水平；此时 `xhprof_enable()` / `xhprof_sample_enable()` 返回 false 并抛出 `E_WARNING`|
+|xhprof.auto_enable  | 0 | >= v2.3.12 |System。请求启动即自动开启分层剖析，无需调用 `xhprof_enable()`（需 `xhprof.profiler=1`；为 0 时静默不生效）|
+|xhprof.auto_enable_flags  | 0 | >= v2.3.12 |System。`xhprof.auto_enable` 使用的 flags，如 `XHPROF_FLAGS_CPU \| XHPROF_FLAGS_MEMORY`|
 
 # 开启额外采集
 #### php.ini 中添加 xhprof.collect_additional_info
@@ -133,8 +148,55 @@ curl_close($ch);
 curl_exec#http://www.baidu.com
 ```
 
+# 数据导出与可视化
+
+除了 HTML 报表，run 数据还可以导出到浏览器之外：
+
+- **火焰图** — `xhprof_html/flamegraph.php` 为一次 run 渲染火焰图。这是**近似视图**：xhprof 存储的是聚合后的 `caller==>callee` 边，而不是逐次调用帧，因此每个函数的 inclusive 指标会按各出边的占比分摊到它的各个调用上，剩余部分计为自身耗时。火焰块宽度是可信的，聚合边之下的拆分只是估算。窄于整条 run 的 `?threshold=<0..1>`（默认 0.01）的火焰块会折叠进 `(others)` 帧。
+- **Callgrind** — 将 run 导出为 callgrind 格式，用 [KCachegrind](https://apps.kde.org/kcachegrind/) 或 QCachegrind 打开，做源码级/被调方分析。
+- **JSON / CSV** — flat 报表的机器可读导出，便于脚本、看板或自建 diff。
+
+所有导出都能从报表页面的 **Export** 链接进入（**Export**：Flame Graph (approximate) | JSON | CSV | callgrind）；直接 URL 形如 `report.php?format=json`、`report.php?format=csv`、`report.php?format=callgrind`。
+
+# XHGui recipe
+
+[XHGui](https://github.com/perftools/xhgui) 把 xhprof 的 run 存入 MongoDB，并提供长期聚合的 UI。这套对接由 perftools 项目维护，不在本仓库内 —— xhprof 只需要提供扩展：
+
+```sh
+pecl install xhprof                        # 本扩展
+composer require perftools/php-profiler perftools/xhgui-collector
+```
+
+```php
+<?php
+// config/config.php —— perftools/php-profiler 的最小配置。
+// php-profiler 会自动探测已加载的剖析扩展；完整选项见其 README
+// （https://github.com/perftools/php-profiler）。
+return [
+    'profiler.enable'      => function () { return true; },
+    'profiler.flags'       => [XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY],
+    'save.handler'         => 'mongodb',
+    'save.handler.mongodb' => [
+        'dsn'      => 'mongodb://127.0.0.1:27017',
+        'database' => 'xhprof',
+    ],
+];
+```
+
+# CLI 报表与 diff 门禁
+
+脚本与 CI 场景无需启动 Web 服务：
+
+```sh
+bin/xhprof-report --source=xhprof_foo <run_id>          # 在终端输出 flat 报表
+bin/xhprof-diff --threshold=5% <baseline> <candidate>   # 超过阈值时以非零状态退出
+```
+
+同一份代码在同一台机器上跑两次也可能相差数十个百分点，因此请比较在相同条件下采集的 run，并把阈值定得高于实测的抖动范围。
+
 # 注意事项
 - xhprof 扩展只要在 php.ini 中加载即产生约 2 倍的函数调用开销（即使从不调用 `xhprof_enable()` 开启剖析）。不剖析的生产环境不建议常驻加载。
+- 如果必须常驻加载但永不剖析，`xhprof.profiler=0` 会使扩展完全不注册 observer：空闲开销回落到与未加载扩展相当的水平；此后 `xhprof_enable()` / `xhprof_sample_enable()` 返回 false 并告警，而不是静默无数据。需要运行时剖析的机器不要设置它。
 - 解析大 run 报表需要 `memory_limit >= 512M`。
 
 ## PECL 仓库

@@ -43,7 +43,7 @@ extern zend_module_entry xhprof_module_entry;
  */
 
 /* XHProf version                           */
-#define XHPROF_VERSION       "2.3.11"
+#define XHPROF_VERSION       "2.3.12"
 
 #define XHPROF_FUNC_HASH_COUNTERS_SIZE   1024
 
@@ -171,7 +171,9 @@ static void tracer_observer_end(zend_execute_data *ex, zval *return_value);
  */
 static void hp_register_constants(INIT_FUNC_ARGS);
 
-static void hp_begin(zend_long level, zend_long xhprof_flags);
+/* Returns 0 (without starting anything) when profiling is disabled through
+ * the xhprof.profiler INI setting */
+static int hp_begin(zend_long level, zend_long xhprof_flags);
 static void hp_stop();
 static void hp_end();
 
@@ -256,6 +258,20 @@ ZEND_BEGIN_MODULE_GLOBALS(xhprof)
 
     zend_bool collect_additional_info;
 
+    /* xhprof.profiler: when 0 the profiler is not instrumented at all and
+     * neither xhprof_enable() nor xhprof_sample_enable() can start it */
+    zend_bool profiler;
+
+    /* xhprof.auto_enable / xhprof.auto_enable_flags: start hierarchical
+     * profiling from RINIT without an explicit xhprof_enable() call */
+    zend_bool auto_enable;
+    zend_long auto_enable_flags;
+
+    /* Per request buffer for the sampled mode call stack symbol; allocated
+     * on demand by hp_sample_stack() and freed by hp_clean_profiler_state() */
+    char *sample_buf;
+    size_t sample_buf_len;
+
 ZEND_END_MODULE_GLOBALS(xhprof)
 
 PHP_MINIT_FUNCTION(xhprof);
@@ -270,7 +286,9 @@ PHP_FUNCTION(xhprof_sample_enable);
 PHP_FUNCTION(xhprof_sample_disable);
 
 #ifdef ZTS
-#define XHPROF_G(v) TSRMG(xhprof_globals_id, zend_xhprof_globals *, v)
+/* ZEND_TSRMG picks the static TSRMLS cache when the build defines
+ * ZEND_ENABLE_STATIC_TSRMLS_CACHE (see config.m4), TSRMG otherwise */
+#define XHPROF_G(v) ZEND_TSRMG(xhprof_globals_id, zend_xhprof_globals *, v)
 #else
 #define XHPROF_G(v) (xhprof_globals.v)
 #endif

@@ -40,11 +40,11 @@
   <email>longxinhui@php.net</email>
   <active>yes</active>
  </lead>
- <date>2026-10-03</date>
- <time>22:00:00</time>
+ <date>2026-10-04</date>
+ <time>00:30:00</time>
  <version>
-  <release>2.3.11</release>
-  <api>2.3.11</api>
+  <release>2.3.12</release>
+  <api>2.3.12</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,19 +52,26 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - Security: fix XSS via URL parameters and report data; fix path
-      traversal and PHP object injection in the web UI.
-    - Crash fixes: SIGSEGV with non-array xhprof_enable() options,
-      ignored_functions "main()", and SQL/curl trace callbacks; SIGFPE
-      with xhprof.sampling_interval=0; recursion counter drift fixed.
-    - Robustness: malformed run data no longer returns HTTP 500.
-    - Verified on PHP 8.3, 8.4, 8.5 and 8.6 (RC2); add tests xhprof_014~018.
-    - CI moved to GitHub Actions; bilingual README; packaging refresh.
+    - New xhprof.profiler INI setting: set to 0 to skip observer registration
+      entirely and remove the idle per-call overhead; xhprof_enable() and
+      xhprof_sample_enable() then fail with a warning.
+    - Long symbols no longer truncate into a single merged entry; sampling
+      mode uses a per-request heap buffer instead of a 512KB stack buffer.
+    - New xhprof.auto_enable / xhprof.auto_enable_flags INI settings; typed
+      arginfo for all exported functions; phpinfo() reports runtime state.
+    - Reports: 20-100x faster sorting (top-N only), approximate flame graph
+      view, callgrind and JSON/CSV export, compare-runs entry in the run
+      list, percentage bars in the parent/child view, bounded typeahead.
+    - New CLI tools: bin/xhprof-report and bin/xhprof-diff (CI regression
+      gate); Docker quick start; XHGui recipe; ZTS static TSRMLS cache.
+    - Phabricator-era support/ tooling and .arcconfig/.arclint removed.
  </notes>
  <contents>
   <dir name="/">
    <file name="examples/sample.php" role="doc" />
    <file name="bin/xhprofile" role="script" />
+   <file name="bin/xhprof-report" role="script" />
+   <file name="bin/xhprof-diff" role="script" />
    <file name="scripts/xhprofile.php" role="script" />
    <file name="resource/pecl.png" role="doc" />
    <file name="resource/xhpy.svg" role="doc" />
@@ -95,6 +102,13 @@
    <file name="extension/tests/xhprof_016.phpt" role="test" />
    <file name="extension/tests/xhprof_017.phpt" role="test" />
    <file name="extension/tests/xhprof_018.phpt" role="test" />
+   <file name="extension/tests/xhprof_019.phpt" role="test" />
+   <file name="extension/tests/xhprof_020.phpt" role="test" />
+   <file name="extension/tests/xhprof_021.phpt" role="test" />
+   <file name="extension/tests/xhprof_022.phpt" role="test" />
+   <file name="extension/tests/xhprof_023.phpt" role="test" />
+   <file name="extension/tests/xhprof_024.phpt" role="test" />
+   <file name="extension/tests/xhprof_025.phpt" role="test" />
    <file name="extension/config.m4" role="src" />
    <file name="extension/config.w32" role="src" />
    <file name="extension/php_xhprof.h" role="src" />
@@ -115,6 +129,9 @@
    <file name="xhprof_html/jquery/jquery.tooltip.css" role="php" />
    <file name="xhprof_html/jquery/jquery.tooltip.js" role="php" />
    <file name="xhprof_html/js/xhprof_report.js" role="php" />
+   <file name="xhprof_html/js/flamegraph.js" role="php" />
+   <file name="xhprof_html/flamegraph.php" role="php" />
+   <file name="xhprof_html/report.php" role="php" />
    <file name="xhprof_html/xhpy.svg" role="php" />
    <file name="xhprof_html/xhpy-blink.svg" role="php" />
    <file name="xhprof_html/xhpy-surprised.svg" role="php" />
@@ -124,6 +141,7 @@
    <file name="xhprof_lib/display/typeahead_common.php" role="php" />
    <file name="xhprof_lib/display/xhprof.php" role="php" />
    <file name="xhprof_lib/utils/callgraph_utils.php" role="php" />
+   <file name="xhprof_lib/utils/xhprof_callgrind.php" role="php" />
    <file name="xhprof_lib/utils/xhprof_lib.php" role="php" />
    <file name="xhprof_lib/utils/xhprof_runs.php" role="php" />
    <file name="CHANGELOG" role="doc" />
@@ -146,6 +164,29 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-04</date>
+      <version>
+       <release>2.3.12</release>
+       <api>2.3.12</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - xhprof.profiler INI setting: 0 skips observer registration and
+         removes idle per-call overhead; enable functions fail with warning.
+       - Long symbols no longer truncate/merge; sampling uses heap buffer.
+       - xhprof.auto_enable(+flags); typed arginfo; phpinfo runtime state.
+       - Reports: faster sorting, approximate flame graph, callgrind and
+         JSON/CSV export, compare-runs entry, percentage bars, typeahead cap.
+       - New CLI: bin/xhprof-report, bin/xhprof-diff; Docker quick start;
+         XHGui recipe; ZTS static TSRMLS cache.
+       - Phabricator-era support/ tooling removed.
+      </notes>
+   </release>
+
    <release>
       <date>2026-10-03</date>
       <version>

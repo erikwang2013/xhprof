@@ -1,0 +1,154 @@
+#!/usr/bin/env php
+<?php
+//
+//  Copyright (c) 2009 Facebook
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+
+/**
+ * Flat per-function report for one XHProf run, on the command line.
+ *
+ * Uses the same compute path (xhprof_compute_flat_info) and the same sorting
+ * (xhprof_sort_flat_data) as the web report, so the numbers match what
+ * xhprof_html/index.php shows.
+ *
+ * usage: xhprof-report [options] <run id | run file>
+ */
+
+require_once dirname(dirname(__FILE__)) . '/xhprof_lib/display/xhprof.php';
+
+$usage = "usage: xhprof-report [options] <run id | run file>\n"
+  . "\n"
+  . "  -f, --file PATH    read the run from PATH instead of a run id\n"
+  . "      --source NAME  run namespace (default: xhprof)\n"
+  . "      --sort COL     wt (default) | cpu | mu | pmu | ct | fn\n"
+  . "      --limit N      print only the top N functions (default: 0 = all)\n"
+  . "  -h, --help\n"
+  . "\n"
+  . "A run id is read from the XHPROF_OUTPUT_DIR directory.\n";
+
+$options = getopt('f:h', array('file:', 'source:', 'sort:', 'limit:', 'help'),
+                  $rest_index);
+
+if (isset($options['h']) || isset($options['help'])) {
+  echo $usage;
+  exit(0);
+}
+
+$args = array_slice($argv, (int)$rest_index);
+
+$file = isset($options['f']) ? $options['f'] :
+        (isset($options['file']) ? $options['file'] : '');
+$source = isset($options['source']) ? $options['source'] : 'xhprof';
+$sort = isset($options['sort']) ? $options['sort'] : 'wt';
+$limit = isset($options['limit']) ? $options['limit'] : 0;
+
+if (!is_numeric($limit) || (int)$limit < 0) {
+  fwrite(STDERR, "xhprof-report: --limit expects a number >= 0\n");
+  exit(2);
+}
+$limit = (int)$limit;
+
+if (!array_key_exists($sort, $sortable_columns)) {
+  fwrite(STDERR, "xhprof-report: unknown sort column '" . $sort . "'\n");
+  exit(2);
+}
+
+// load the run: from a file when -f was given, otherwise as a run id.
+if ($file !== '') {
+  $contents = @file_get_contents($file);
+  if ($contents === false) {
+    fwrite(STDERR, "xhprof-report: cannot read " . $file . "\n");
+    exit(2);
+  }
+  $raw_data = @unserialize($contents, array('allowed_classes' => false));
+  if (!is_array($raw_data)) {
+    fwrite(STDERR, "xhprof-report: " . $file . " does not hold an XHProf run\n");
+    exit(2);
+  }
+  $raw_data = xhprof_sanitize_run_data($raw_data);
+  $label = $file;
+} else {
+  if (!count($args)) {
+    fwrite(STDERR, $usage);
+    exit(2);
+  }
+  $run_id = $args[0];
+  $xhprof_runs_impl = new XHProfRuns_Default();
+  $raw_data = $xhprof_runs_impl->get_run($run_id, $source, $description);
+  if (!is_array($raw_data)) {
+    fwrite(STDERR, "xhprof-report: could not load run '" . $run_id
+           . "' (source: " . $source . ")\n");
+    exit(2);
+  }
+  $label = $run_id . ' (source: ' . $source . ')';
+}
+
+init_metrics($raw_data, '', $sort, false);
+
+$totals = array();
+$symbol_tab = xhprof_compute_flat_info($raw_data, $totals);
+
+$flat_data = array();
+foreach ($symbol_tab as $symbol => $info) {
+  $info['fn'] = $symbol;
+  $flat_data[] = $info;
+}
+
+// xhprof_sort_flat_data() reads the sort column from $sort_col, which
+// init_metrics() set from --sort ($sort_col can also have been switched to
+// "samples" for C++ profiler runs that carry no wall time).
+$sorted = xhprof_sort_flat_data($flat_data, $limit);
+
+$columns = array();
+if ($display_calls) {
+  $columns[] = 'ct';
+}
+foreach (xhprof_get_metrics($raw_data) as $metric) {
+  $columns[] = $metric;
+}
+
+echo "run: " . $label . "\n";
+echo count($flat_data) . " function(s), sorted by " . $sort_col
+  . (($sort_col == 'fn') ? " asc" : " desc");
+if ($limit > 0 && count($flat_data) > $limit) {
+  echo ", top " . $limit;
+}
+echo "\n\n";
+
+$format = "%-60s";
+foreach ($columns as $column) {
+  $format .= " %14s";
+}
+
+$line = array('fn');
+foreach ($columns as $column) {
+  $line[] = $column;
+}
+echo vsprintf($format, $line) . "\n";
+
+$row_format = $format . "\n";
+foreach ($sorted as $row) {
+  $line = array($row['fn']);
+  foreach ($columns as $column) {
+    $line[] = isset($row[$column]) ? xhprof_count_format($row[$column]) : '-';
+  }
+  echo vsprintf($row_format, $line);
+}
+
+$line = array('TOTAL');
+foreach ($columns as $column) {
+  $line[] = isset($totals[$column]) ? xhprof_count_format($totals[$column]) : '';
+}
+echo vsprintf($row_format, $line);

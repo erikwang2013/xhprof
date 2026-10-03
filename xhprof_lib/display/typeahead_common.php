@@ -57,8 +57,24 @@ if (!empty($run)) {
     xhprof_get_matching_functions($q, $raw_data) : array();
 
 
-  $functions = array_unique(array_merge($functions1, $functions2));
-  asort($functions);
+  // merge both runs, keeping the prefix matches of each run in front of
+  // its middle matches instead of re-sorting everything alphabetically.
+  $functions = array();
+  $infix = array();
+  $seen = array();
+
+  foreach (array_merge($functions1, $functions2) as $f) {
+    if (isset($seen[$f])) {
+      continue;
+    }
+    $seen[$f] = 1;
+    if (stripos($f, $q) === 0) {
+      $functions[] = $f;
+    } else {
+      $infix[] = $f;
+    }
+  }
+  $functions = array_merge($functions, $infix);
 } else {
   xhprof_error("no valid runs specified to typeahead endpoint");
   $functions = array();
@@ -76,6 +92,9 @@ if (in_array($q, $functions)) {
     }
   }
 }
+
+// diff mode merges the (already capped) matches of two runs: cap again.
+$functions = array_slice($functions, 0, 50);
 
 foreach ($functions as $f) {
   // one function name per line, escaped: the autocomplete widget renders

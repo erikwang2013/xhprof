@@ -179,7 +179,9 @@ function ChildRowToolTip(cell, metric)
 }
 
 $(document).ready(function() {
-  $('td[@metric]').tooltip(
+  // NOTE: 'td[metric]' (not the XPath-ish 'td[@metric]' jQuery 1.1 syntax)
+  // so a newer jQuery can be dropped in without losing the tooltips.
+  $('td[metric]').tooltip(
     { bodyHandler: function() {
           var type = $(this).attr('type');
           var metric = $(this).attr('metric');

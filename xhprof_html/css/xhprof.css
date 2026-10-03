@@ -71,6 +71,24 @@ ul.xhprof_actions {
   position:relative;
 }
 
+/* share-of-parent bar in the parent/child report: the width is set inline */
+.pctbar {
+  height: 5px;
+  margin-top: 2px;
+  background: #e5e5e5;
+  border: solid 1px #d0d0d0;
+}
+
+.pctbar_fill {
+  height: 5px;
+  background: #6b8fc4;
+}
+
+/* the row of the function the parent/child report is about */
+tr.current_function {
+  background: #fff3c4;
+}
+
 ul.xhprof_actions li {
   border-bottom:1px solid #D8DFEA;
 }

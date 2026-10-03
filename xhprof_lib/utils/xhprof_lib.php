@@ -992,26 +992,58 @@ function xhprof_param_init($params) {
  * specified XHProf run. This is used for the type ahead function
  * selector.
  *
+ * Names where $q matches at the start are ranked before names where it
+ * only matches in the middle, an exact match comes first, and at most
+ * $limit names are returned (a big run can match thousands of symbols,
+ * and the widget only has room for a handful).
+ *
+ * @param string $q           partial function name to look for
+ * @param array  $xhprof_data raw run data
+ * @param int    $limit       maximum number of matches to return
+ *                            (<= 0 for no limit)
+ *
  * @author Kannan
  */
-function xhprof_get_matching_functions($q, $xhprof_data) {
+function xhprof_get_matching_functions($q, $xhprof_data, $limit = 50) {
 
-  $matches = array();
+  $prefix_matches = array();
+  $infix_matches = array();
 
   foreach ($xhprof_data as $parent_child => $info) {
     list($parent, $child) = xhprof_parse_parent_child($parent_child);
-    if (stripos($parent, $q) !== false) {
-      $matches[$parent] = 1;
-    }
-    if (stripos($child, $q) !== false) {
-      $matches[$child] = 1;
+
+    // a bare entry ("main()") has no parent
+    foreach (array($parent, $child) as $name) {
+      if ($name === null) {
+        continue;
+      }
+      if (stripos($name, $q) === 0) {
+        $prefix_matches[$name] = 1;
+      } else if (stripos($name, $q) !== false) {
+        $infix_matches[$name] = 1;
+      }
     }
   }
 
-  $res = array_keys($matches);
+  // an exact match is guaranteed to survive the limit below.
+  $exact = array();
+  if (isset($prefix_matches[$q])) {
+    $exact = array($q);
+    unset($prefix_matches[$q]);
+  }
 
-  // sort it so the answers are in some reliable order...
-  asort($res);
+  $prefix = array_keys($prefix_matches);
+  $infix = array_keys($infix_matches);
 
-  return ($res);
+  // sort each bucket so the answers are in some reliable order...
+  sort($prefix);
+  sort($infix);
+
+  $res = array_merge($exact, $prefix, $infix);
+
+  if ($limit > 0) {
+    $res = array_slice($res, 0, $limit);
+  }
+
+  return $res;
 }

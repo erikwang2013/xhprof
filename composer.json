@@ -15,5 +15,5 @@
             "xhprof_lib/utils/xhprof_runs.php"
         ]
     },
-    "bin": ["bin/xhprofile"]
+    "bin": ["bin/xhprofile", "bin/xhprof-report", "bin/xhprof-diff"]
 }

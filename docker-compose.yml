@@ -1,0 +1,10 @@
+services:
+  xhprof:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: xhprof-demo
+    ports:
+      - "8080:8080"
+    # Seed one example run (namespace `xhprof_foo`), then serve the UI.
+    command: sh -c "php examples/sample.php >/dev/null && php -S 0.0.0.0:8080 -t xhprof_html"

@@ -12,8 +12,6 @@ extension/tests/*.diff
 extension/tests/*.log
 !extension/tests/*.php
 
-support/libxhprof/.phutil_module_cache
-
 # Ruflo local secrets and runtime data
 .env
 .env.local

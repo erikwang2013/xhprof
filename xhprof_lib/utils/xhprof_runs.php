@@ -164,8 +164,10 @@ class XHProfRuns_Default implements iXHProfRuns {
     }
 
     // Run files hold plain data: never instantiate objects while
-    // unserializing them.
-    $raw_data = unserialize($contents, array('allowed_classes' => false));
+    // unserializing them. Malformed files are reported through the
+    // "Invalid Run Id" path below; silence the unserialize() warning so
+    // it cannot leak into the response body when display_errors is on.
+    $raw_data = @unserialize($contents, array('allowed_classes' => false));
     if (!is_array($raw_data)) {
       xhprof_error("Could not unserialize file $file_name");
       $run_desc = "Invalid Run Id = $run_id";
@@ -211,18 +213,50 @@ class XHProfRuns_Default implements iXHProfRuns {
 
   function list_runs() {
     if (is_dir($this->dir)) {
-        echo "<hr/>Existing runs:\n<ul>\n";
+        $script_name = isset($_SERVER['SCRIPT_NAME']) ?
+          $_SERVER['SCRIPT_NAME'] : 'index.php';
+        $script_url = htmlentities($script_name);
+
+        echo "<hr/>Existing runs:\n";
+        // pick two runs and jump straight to the diff report for them
+        echo '<div style="margin: 4px 0px;">'
+            . '<button type="button" class="xhprof_compare_button" '
+            . 'onclick="xhprofCompareSelectedRuns()">Compare selected</button> '
+            . '<small>check two runs above the list first; the first one '
+            . 'checked is the baseline (run1)</small></div>' . "\n";
+        echo "<ul>\n";
         $files = glob("{$this->dir}/*.{$this->suffix}");
 		usort($files, function($a, $b) {return filemtime($b) - filemtime($a);});
         foreach ($files as $file) {
             list($run,$source) = explode('.', basename($file));
-            echo '<li><a href="' . htmlentities($_SERVER['SCRIPT_NAME'])
+            echo '<li><input type="checkbox" class="xhprof_run_select" value="'
+                . htmlentities($run) . '" data-source="'
+                . htmlentities($source) . '"> <a href="' . $script_url
                 . '?run=' . htmlentities($run) . '&source='
                 . htmlentities($source) . '">'
                 . htmlentities(basename($file)) . "</a><small> "
                 . date("Y-m-d H:i:s", filemtime($file)) . "</small></li>\n";
         }
         echo "</ul>\n";
+        echo "<script type=\"text/javascript\">\n"
+            . "function xhprofCompareSelectedRuns() {\n"
+            . "  var boxes = document.getElementsByClassName ? "
+            . "document.getElementsByClassName('xhprof_run_select') : [];\n"
+            . "  var picked = [];\n"
+            . "  for (var i = 0; i < boxes.length; i++) {\n"
+            . "    if (boxes[i].checked) { picked.push(boxes[i]); }\n"
+            . "  }\n"
+            . "  if (picked.length != 2) {\n"
+            . "    alert('Check exactly two runs to compare them.');\n"
+            . "    return;\n"
+            . "  }\n"
+            . "  location.href = " . json_encode($script_name)
+            . " + '?run1=' + encodeURIComponent(picked[0].value)\n"
+            . "    + '&run2=' + encodeURIComponent(picked[1].value)\n"
+            . "    + '&source=' + encodeURIComponent("
+            . "picked[0].getAttribute('data-source'));\n"
+            . "}\n"
+            . "</script>\n";
     }
   }
 }
