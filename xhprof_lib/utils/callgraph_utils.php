@@ -149,6 +149,44 @@ function xhprof_get_children_table($raw_data) {
 }
 
 /**
+ * Pick the metric a callgraph is drawn for: the requested one when the run
+ * carries it, else the first metric the run has (wall time for instrumented
+ * PHP runs, samples for sampled / C++ profiler runs) -- the same choice the
+ * flat report makes.
+ *
+ * @param array  $raw_data   raw XHProf data
+ * @param string $requested  metric asked for, or null for automatic
+ *
+ * @return string metric name
+ */
+function xhprof_callgraph_metric($raw_data, $requested = null) {
+  $metrics = xhprof_get_metrics($raw_data);
+  if ($requested !== null && in_array($requested, $metrics, true)) {
+    return $requested;
+  }
+  return empty($metrics) ? 'wt' : $metrics[0];
+}
+
+/**
+ * Divisor and unit used in callgraph labels for a metric: times are shown
+ * in milliseconds like the flat report, memory in bytes and sample counts
+ * as the sample count itself.
+ *
+ * @param string $metric metric name
+ *
+ * @return array (divisor, unit)
+ */
+function xhprof_callgraph_metric_unit($metric) {
+  if ($metric == 'mu' || $metric == 'pmu') {
+    return array(1, 'bytes');
+  }
+  if ($metric == 'samples') {
+    return array(1, 'samples');
+  }
+  return array(1000, 'ms');
+}
+
+/**
  * Generate DOT script from the given raw phprof data.
  *
  * @param raw_data, phprof profile data.
@@ -161,13 +199,16 @@ function xhprof_get_children_table($raw_data) {
  * @param func, string, the focus function.
  * @param critical_path, bool, whether or not to display critical path with
  *                             bold lines.
+ * @param metric, string(optional), the metric the graph is drawn for
+ *                (wall time by default; a run without wall time, e.g. a
+ *                sampled one, falls back to the first metric it has).
  * @returns, string, the DOT script to generate image.
  *
  * @author cjiang
  */
 function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
                                     $func, $critical_path, $right=null,
-                                    $left=null) {
+                                    $left=null, $metric=null) {
 
   $max_width = 5;
   $max_height = 3.5;
@@ -180,6 +221,14 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
     // init_metrics($raw_data, null, null);
   }
   $sym_table = xhprof_compute_flat_info($raw_data, $totals);
+
+  $metric = xhprof_callgraph_metric($raw_data, $metric);
+  $excl_metric = "excl_" . $metric;
+  list($metric_div, $metric_unit) = xhprof_callgraph_metric_unit($metric);
+
+  // instrumented runs carry call counts, sampled / C++ profiler runs do
+  // not: a made up "0 calls" label would be worse than none.
+  $has_calls = isset($raw_data["main()"]["ct"]);
 
   if ($critical_path) {
     $children_table = xhprof_get_children_table($raw_data);
@@ -198,9 +247,9 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
           }
           if ($max_child === null ||
             abs($raw_data[xhprof_build_parent_child_key($node,
-                                                        $child)]["wt"]) >
+                                                        $child)][$metric]) >
             abs($raw_data[xhprof_build_parent_child_key($node,
-                                                        $max_child)]["wt"])) {
+                                                        $max_child)][$metric])) {
             $max_child = $child;
           }
         }
@@ -249,6 +298,10 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
   }
 
   $result = "digraph call_graph {\n";
+  // graphviz draws an opaque white polygon behind the SVG; the report pages
+  // have a dark mode, and CSS cannot override it, so ask for a transparent
+  // background instead.
+  $result .= "graph [bgcolor=\"transparent\"];\n";
 
   // Filter out functions whose exclusive time ratio is below threshold, and
   // also assign a unique integer id for each function to be generated. In the
@@ -258,13 +311,13 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
   foreach ($sym_table as $symbol => $info) {
     // a zero total (empty or crafted run) has no ratio to compare against.
     if (empty($func) &&
-        (empty($totals["wt"]) ||
-         abs($info["wt"] / $totals["wt"]) < $threshold)) {
+        (empty($totals[$metric]) ||
+         abs($info[$metric] / $totals[$metric]) < $threshold)) {
       unset($sym_table[$symbol]);
       continue;
     }
-    if ($max_wt == 0 || $max_wt < abs($info["excl_wt"])) {
-      $max_wt = abs($info["excl_wt"]);
+    if ($max_wt == 0 || $max_wt < abs($info[$excl_metric])) {
+      $max_wt = abs($info[$excl_metric]);
     }
     $sym_table[$symbol]["id"] = $cur_id;
     $cur_id ++;
@@ -272,10 +325,10 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
 
   // Generate all nodes' information.
   foreach ($sym_table as $symbol => $info) {
-    if ($info["excl_wt"] == 0) {
+    if ($info[$excl_metric] == 0) {
       $sizing_factor = $max_sizing_ratio;
     } else {
-      $sizing_factor = $max_wt / abs($info["excl_wt"]) ;
+      $sizing_factor = $max_wt / abs($info[$excl_metric]) ;
       if ($sizing_factor > $max_sizing_ratio) {
         $sizing_factor = $max_sizing_ratio;
       }
@@ -298,56 +351,67 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
 
     if ($symbol == "main()") {
       $shape = "octagon";
-      $name = "Total: ".($totals["wt"] / 1000.0)." ms\\n";
+      $name = "Total: ".($totals[$metric] / $metric_div)." ".$metric_unit."\\n";
       $name .= addslashes(isset($page) ? $page : $symbol);
     } else {
       $shape = "box";
-      $pct_inc = empty($totals["wt"]) ? "0.0%"
-                 : sprintf("%.1f%%", 100 * $info["wt"] / $totals["wt"]);
-      $name = addslashes($symbol)."\\nInc: ". sprintf("%.3f",$info["wt"] / 1000) .
-              " ms (" . $pct_inc . ")";
+      $pct_inc = empty($totals[$metric]) ? "0.0%"
+                 : sprintf("%.1f%%", 100 * $info[$metric] / $totals[$metric]);
+      $name = addslashes($symbol)."\\nInc: "
+              . sprintf("%.3f",$info[$metric] / $metric_div)
+              . " " . $metric_unit . " (" . $pct_inc . ")";
     }
     if ($left === null) {
-      $pct_excl = empty($totals["wt"]) ? "0.0%"
-                  : sprintf("%.1f%%", 100 * $info["excl_wt"] / $totals["wt"]);
+      $pct_excl = empty($totals[$metric]) ? "0.0%"
+                  : sprintf("%.1f%%", 100 * $info[$excl_metric] / $totals[$metric]);
+      $calls_text = $has_calls ? "\\n".($info["ct"] ?? 0)." total calls" : "";
       $label = ", label=\"".$name."\\nExcl: "
-               .(sprintf("%.3f",$info["excl_wt"] / 1000.0))." ms ("
+               .(sprintf("%.3f",$info[$excl_metric] / $metric_div))." ".$metric_unit." ("
                .$pct_excl
-               . ")\\n".$info["ct"]." total calls\"";
+               . ")".$calls_text."\"";
     } else {
       if (isset($left[$symbol]) && isset($right[$symbol])) {
          $label = ", label=\"".addslashes($symbol).
-                  "\\nInc: ".(sprintf("%.3f",$left[$symbol]["wt"] / 1000.0))
-                  ." ms - "
-                  .(sprintf("%.3f",$right[$symbol]["wt"] / 1000.0))." ms = "
-                  .(sprintf("%.3f",$info["wt"] / 1000.0))." ms".
+                  "\\nInc: ".(sprintf("%.3f",($left[$symbol][$metric] ?? 0) / $metric_div))
+                  ." ".$metric_unit." - "
+                  .(sprintf("%.3f",($right[$symbol][$metric] ?? 0) / $metric_div))." ".$metric_unit." = "
+                  .(sprintf("%.3f",$info[$metric] / $metric_div))." ".$metric_unit.
                   "\\nExcl: "
-                  .(sprintf("%.3f",$left[$symbol]["excl_wt"] / 1000.0))
-                  ." ms - ".(sprintf("%.3f",$right[$symbol]["excl_wt"] / 1000.0))
-                   ." ms = ".(sprintf("%.3f",$info["excl_wt"] / 1000.0))." ms".
-                  "\\nCalls: ".(sprintf("%.3f",$left[$symbol]["ct"]))." - "
-                   .(sprintf("%.3f",$right[$symbol]["ct"]))." = "
-                   .(sprintf("%.3f",$info["ct"]))."\"";
+                  .(sprintf("%.3f",($left[$symbol][$excl_metric] ?? 0) / $metric_div))
+                  ." ".$metric_unit." - ".(sprintf("%.3f",($right[$symbol][$excl_metric] ?? 0) / $metric_div))
+                   ." ".$metric_unit." = ".(sprintf("%.3f",$info[$excl_metric] / $metric_div))." ".$metric_unit.
+                  ($has_calls
+                   ? "\\nCalls: ".(sprintf("%.3f",($left[$symbol]["ct"] ?? 0)))." - "
+                     .(sprintf("%.3f",($right[$symbol]["ct"] ?? 0)))." = "
+                     .(sprintf("%.3f",$info["ct"]))
+                   : "")
+                  ."\"";
       } else if (isset($left[$symbol])) {
         $label = ", label=\"".addslashes($symbol).
-                  "\\nInc: ".(sprintf("%.3f",$left[$symbol]["wt"] / 1000.0))
-                   ." ms - 0 ms = ".(sprintf("%.3f",$info["wt"] / 1000.0))
-                   ." ms"."\\nExcl: "
-                   .(sprintf("%.3f",$left[$symbol]["excl_wt"] / 1000.0))
-                   ." ms - 0 ms = "
-                   .(sprintf("%.3f",$info["excl_wt"] / 1000.0))." ms".
-                  "\\nCalls: ".(sprintf("%.3f",$left[$symbol]["ct"]))." - 0 = "
-                  .(sprintf("%.3f",$info["ct"]))."\"";
+                  "\\nInc: ".(sprintf("%.3f",($left[$symbol][$metric] ?? 0) / $metric_div))
+                   ." ".$metric_unit." - 0 ".$metric_unit." = ".(sprintf("%.3f",$info[$metric] / $metric_div))
+                   ." ".$metric_unit."\\nExcl: "
+                   .(sprintf("%.3f",($left[$symbol][$excl_metric] ?? 0) / $metric_div))
+                   ." ".$metric_unit." - 0 ".$metric_unit." = "
+                   .(sprintf("%.3f",$info[$excl_metric] / $metric_div))." ".$metric_unit.
+                  ($has_calls
+                   ? "\\nCalls: ".(sprintf("%.3f",($left[$symbol]["ct"] ?? 0)))." - 0 = "
+                     .(sprintf("%.3f",$info["ct"]))
+                   : "")
+                  ."\"";
       } else {
         $label = ", label=\"".addslashes($symbol).
-                  "\\nInc: 0 ms - "
-                  .(sprintf("%.3f",$right[$symbol]["wt"] / 1000.0))
-                  ." ms = ".(sprintf("%.3f",$info["wt"] / 1000.0))." ms".
-                  "\\nExcl: 0 ms - "
-                  .(sprintf("%.3f",$right[$symbol]["excl_wt"] / 1000.0))
-                  ." ms = ".(sprintf("%.3f",$info["excl_wt"] / 1000.0))." ms".
-                  "\\nCalls: 0 - ".(sprintf("%.3f",$right[$symbol]["ct"]))
-                  ." = ".(sprintf("%.3f",$info["ct"]))."\"";
+                  "\\nInc: 0 ".$metric_unit." - "
+                  .(sprintf("%.3f",($right[$symbol][$metric] ?? 0) / $metric_div))
+                  ." ".$metric_unit." = ".(sprintf("%.3f",$info[$metric] / $metric_div))." ".$metric_unit.
+                  "\\nExcl: 0 ".$metric_unit." - "
+                  .(sprintf("%.3f",($right[$symbol][$excl_metric] ?? 0) / $metric_div))
+                  ." ".$metric_unit." = ".(sprintf("%.3f",$info[$excl_metric] / $metric_div))." ".$metric_unit.
+                  ($has_calls
+                   ? "\\nCalls: 0 - ".(sprintf("%.3f",($right[$symbol]["ct"] ?? 0)))
+                     ." = ".(sprintf("%.3f",$info["ct"]))
+                   : "")
+                  ."\"";
       }
     }
     $result .= "N" . $sym_table[$symbol]["id"];
@@ -363,19 +427,21 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
         (empty($func) ||
          (!empty($func) && ($parent == $func || $child == $func)))) {
 
-      $label = $info["ct"] == 1 ? $info["ct"]." call" : $info["ct"]." calls";
+      $label = $has_calls
+               ? (($info["ct"] ?? 0) == 1 ? $info["ct"]." call" : $info["ct"]." calls")
+               : "";
 
-      $headlabel = $sym_table[$child]["wt"] > 0 ?
-                  sprintf("%.1f%%", 100 * $info["wt"]
-                                    / $sym_table[$child]["wt"])
+      $headlabel = $sym_table[$child][$metric] > 0 ?
+                  sprintf("%.1f%%", 100 * $info[$metric]
+                                    / $sym_table[$child][$metric])
                   : "0.0%";
 
       // parent's time spent in its children; can be zero when the child
       // edge carries no time, in which case there is no ratio to report.
-      $parent_self_wt = $sym_table[$parent]["wt"]
-                        - $sym_table[$parent]["excl_wt"];
-      $taillabel = ($sym_table[$parent]["wt"] > 0 && $parent_self_wt != 0) ?
-        sprintf("%.1f%%", 100 * $info["wt"] / $parent_self_wt)
+      $parent_self_wt = $sym_table[$parent][$metric]
+                        - $sym_table[$parent][$excl_metric];
+      $taillabel = ($sym_table[$parent][$metric] > 0 && $parent_self_wt != 0) ?
+        sprintf("%.1f%%", 100 * $info[$metric] / $parent_self_wt)
         : "0.0%";
 
       $linewidth = 1;

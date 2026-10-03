@@ -20,15 +20,22 @@
  * GET params:
  *   run     run id (like the report pages)
  *   source  run namespace (default "xhprof")
- *   format  json | csv | callgrind (default json)
+ *   format  json | csv | callgrind | folded (default json)
  *
  * JSON carries the flat per-function metrics plus the run totals, CSV has
  * one row per function (last row: the totals) and callgrind emits the
  * caller/callee edges in Valgrind's profile exchange format.
  *
+ * folded exports a sampling-mode run as folded stacks: one
+ * "<frame>;<frame>;... <sample count>" line per distinct stack, ready for
+ * the usual flame graph tooling. It is the only format that cannot work
+ * off the sanitized run data (the stacks live in string values), so it
+ * reads the run raw; for a run that was not collected in sampling mode the
+ * response is 400 text/plain.
+ *
  * CSV columns: fn, [ct,] then <metric>, excl_<metric> for every metric the
  * run carries; the TOTAL row leaves the exclusive columns empty (there is no
- * per-run exclusive total). csv and callgrind are sent as downloads
+ * per-run exclusive total). csv, callgrind and folded are sent as downloads
  * (Content-Disposition); an unknown format falls back to json. When the run
  * cannot be loaded the response is 404 text/plain.
  */
@@ -49,11 +56,59 @@ $params = array('run' => array(XHPROF_STRING_PARAM, ''),
 xhprof_param_init($params);
 
 $format = strtolower($format);
-if (!in_array($format, array('json', 'csv', 'callgrind'), true)) {
+if (!in_array($format, array('json', 'csv', 'callgrind', 'folded'), true)) {
   $format = 'json';
 }
 
 $xhprof_runs_impl = new XHProfRuns_Default();
+
+$file_base = 'xhprof-' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string)$run);
+
+if ($format === 'folded') {
+  // Sampling-mode runs only, and they cannot go through get_run(): their
+  // profile is the per-sample stack strings, which get_run() sanitizes to
+  // 0. Read the run file raw and check what it holds.
+  $raw = ($run !== '' && method_exists($xhprof_runs_impl, 'read_run_raw')) ?
+         $xhprof_runs_impl->read_run_raw($run, $source) : null;
+
+  if ($raw === null) {
+    // no run id, or a run file that cannot be read/parsed.
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo "Could not load XHProf run: " . (is_scalar($run) ? $run : '') . "\n";
+    return;
+  }
+  if (!xhprof_is_sampled_run($raw)) {
+    http_response_code(400);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo "format=folded is only supported for sampling-mode runs "
+       . "(collected with xhprof_sample_enable); this run is not one.\n";
+    return;
+  }
+
+  header('Content-Type: text/plain; charset=UTF-8');
+  header('Content-Disposition: attachment; filename="'
+         . $file_base . '.folded"');
+
+  // one line per distinct stack, "<frame>;<frame>;... <sample count>". The
+  // frames are joined with ";" (the folded-stack convention) where XHProf
+  // records the same stacks with "==>".
+  $stacks = array();
+  foreach ($raw as $stack) {
+    // crafted data can carry newlines in a stack string: they would break
+    // the one-line-per-stack format.
+    $stack = str_replace(array("\r", "\n"), ' ',
+                         str_replace('==>', ';', (string)$stack));
+    if (!isset($stacks[$stack])) {
+      $stacks[$stack] = 0;
+    }
+    $stacks[$stack]++;
+  }
+  foreach ($stacks as $stack => $count) {
+    echo $stack, ' ', $count, "\n";
+  }
+  return;
+}
 
 $raw_data = ($run !== '') ?
   $xhprof_runs_impl->get_run($run, $source, $description) : null;
@@ -64,8 +119,6 @@ if (!is_array($raw_data)) {
   echo "Could not load XHProf run: " . (is_scalar($run) ? $run : '') . "\n";
   return;
 }
-
-$file_base = 'xhprof-' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string)$run);
 
 if ($format === 'callgrind') {
   header('Content-Type: text/plain; charset=UTF-8');
@@ -116,6 +169,11 @@ foreach ($metrics as $metric) {
 }
 
 $out = fopen('php://output', 'w');
+
+// UTF-8 BOM: without it Excel guesses the machine's ANSI codepage and
+// mangles non-ASCII function names. CSV only -- nothing else here is meant
+// to be opened in a spreadsheet.
+fwrite($out, "\xEF\xBB\xBF");
 
 // explicit delimiter/enclosure/escape: the escape default is deprecated
 // and backslash escaping is not part of CSV anyway.

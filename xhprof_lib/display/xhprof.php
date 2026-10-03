@@ -62,21 +62,11 @@ function xhprof_include_js_css($ui_dir_url_path = null) {
     $ui_dir_url_path = $base_path;
   }
 
-  // style sheets
+  // style sheets: the tooltip and typeahead styles now live in xhprof.css
   echo "<link href='$ui_dir_url_path/css/xhprof.css' rel='stylesheet' ".
     " type='text/css' />";
-  echo "<link href='$ui_dir_url_path/jquery/jquery.tooltip.css' ".
-    " rel='stylesheet' type='text/css' />";
-  echo "<link href='$ui_dir_url_path/jquery/jquery.autocomplete.css' ".
-    " rel='stylesheet' type='text/css' />";
 
-  // javascript
-  echo "<script src='$ui_dir_url_path/jquery/jquery-1.2.6.js'>".
-       "</script>";
-  echo "<script src='$ui_dir_url_path/jquery/jquery.tooltip.js'>".
-       "</script>";
-  echo "<script src='$ui_dir_url_path/jquery/jquery.autocomplete.js'>"
-       ."</script>";
+  // javascript: the report tooltip and typeahead are plain js, no jQuery
   echo "<script src='$ui_dir_url_path/js/xhprof_report.js'></script>";
 }
 
@@ -108,6 +98,32 @@ function xhprof_count_format($num) {
 
 function xhprof_percent_format($s, $precision = 1) {
   return sprintf('%.'.$precision.'f%%', 100 * $s);
+}
+
+/**
+ * Is this raw run one that was collected in sampling mode?
+ *
+ * xhprof_sample_disable() returns a map keyed by "<sec>.<usec>", one entry
+ * per sample, whose value is the collapsed call stack of that sample
+ * ("main()==>a==>b") -- not the usual caller==>callee edge table. The whole
+ * profile lives in those string values, which get_run() sanitizes to 0, so
+ * a sampling run has to be read with read_run_raw() and recognized here
+ * before any other report code touches it.
+ *
+ * @param mixed $raw_data  run data exactly as stored in the run file
+ *
+ * @return bool
+ */
+function xhprof_is_sampled_run($raw_data) {
+  if (!is_array($raw_data) || count($raw_data) === 0) {
+    return false;
+  }
+  foreach ($raw_data as $key => $value) {
+    if (!is_string($value) || !preg_match('/^\d+\.\d{6}$/', (string)$key)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**

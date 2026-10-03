@@ -6,7 +6,7 @@
 
 XHProf 是 PHP 的函数级分层分析器：原始数据采集组件用 C 实现（作为 PHP 扩展），报表/UI 层则完全使用 PHP 实现。它可以报告每个函数的 inclusive 与 exclusive wall time、内存占用、CPU 时间和调用次数，并支持对比两次运行（分层 DIFF 报表）或聚合多次运行的结果。
 
-围绕这个内核，本仓库提供完整工具链：带运行列表与一键对比的 Web UI（flat / parent-child / DIFF / 聚合报表）、调用图与**近似**火焰图视图；callgrind、JSON、CSV 导出；CLI 工具（`bin/xhprofile`、`bin/xhprof-report`，以及可挂进 CI 的回归门禁 `bin/xhprof-diff`）；`docker compose up` 一键演示；以及 `xhprof.profiler=0` 门控——扩展保持加载，但空闲开销回落到未加载扩展的水平。支持 PHP 7.2–8.6。
+围绕这个内核，本仓库提供完整工具链：带运行列表与一键对比的 Web UI（flat / parent-child / DIFF / 聚合报表）、调用图与火焰图视图（分层 run 为**近似**、采样 run 为精确）；callgrind、JSON、CSV 与 folded 栈导出；CLI 工具（`bin/xhprofile`、`bin/xhprof-report`，以及可挂进 CI 的回归门禁 `bin/xhprof-diff`）；`docker compose up` 一键演示；以及 `xhprof.profiler=0` 门控——扩展保持加载，但空闲开销回落到未加载扩展的水平。支持 PHP 7.2–8.6。
 
 # 为什么选择 xhprof
 - **数据不出本机。** 剖析结果只写入你自己的 `xhprof.output_dir` 并留在那里——无服务、无上传、无遥测。
@@ -29,7 +29,19 @@ XHProf 是 PHP 的函数级分层分析器：原始数据采集组件用 C 实�
 
 <p align="center"><img src="resource/xhprof-features.svg" alt="XHProf 功能矩阵：剖析、采样、五项指标、对比、DIFF、聚合、调用图、火焰图、导出、CLI、Docker、XHGui" width="900"></p>
 
-一格一项能力：精确分层剖析与采样模式、五项指标、运行列表与一键对比、分层 DIFF、聚合、调用图、近似火焰图、三种导出格式、CLI 回归门禁、Docker 一键演示与 XHGui 对接——另外两项属性适用于以上全部：PHP 7.2–8.6 兼容性与 `xhprof.profiler` 门控。
+一格一项能力：精确分层剖析与采样模式、五项指标、运行列表与一键对比、分层 DIFF、聚合、调用图、火焰图（分层 run 近似、采样 run 精确）、四种导出格式、CLI 回归门禁、Docker 一键演示与 XHGui 对接——另外两项属性适用于以上全部：PHP 7.2–8.6 兼容性与 `xhprof.profiler` 门控。
+
+其中两种视图的实际界面（截图取自 Docker 演示数据）：
+
+<p align="center">
+  <img src="xhprof_html/docs/sample-diff-report-flat-view.jpg" alt="XHProf DIFF 报表：整体差异汇总与按 inclusive wall time 排序的回归/改进列表" width="900"><br>
+  <em>DIFF 报表 —— 对比两次 run：整体差异汇总，以及按 inclusive wall time 差异排序的 Top 回归/改进。</em>
+</p>
+
+<p align="center">
+  <img src="xhprof_html/docs/sample-flamegraph.jpg" alt="XHProf 近似火焰图" width="900"><br>
+  <em>近似火焰图（分层 run）—— 火焰块宽度可信，但聚合边之下的拆分只是估算。</em>
+</p>
 
 # 生命周期 / Lifecycle
 
@@ -48,7 +60,7 @@ xhprof/
 │   │                     #   callgraph_utils、xhprof_callgrind
 │   └── display/          # 报表渲染层（xhprof.php）
 ├── xhprof_html/          # Web UI：index.php、report.php、callgraph.php、flamegraph.php
-│   ├── css/ js/ jquery/  # 样式、报表与火焰图脚本、内置 jQuery
+│   ├── css/ js/          # 样式表与原生报表 / 火焰图脚本
 │   └── docs/             # 用户指南（index.html、index-fr.html）与截图
 ├── bin/                  # CLI：xhprofile（剖析脚本）、xhprof-report、xhprof-diff
 ├── scripts/              # 发布脚本与采样封装（xhprofile.php）
@@ -88,6 +100,8 @@ docker compose up
 ```sh
 pecl install xhprof
 ```
+
+> **渠道说明：** PECL 上 xhprof 的最新发布仍是 2.3.10（2024-07）。2.3.11 起的安全修复与功能只在本仓库中，需要按下文从源码编译安装才能获得。
 
 ## 从源码编译安装
 ```
@@ -203,20 +217,24 @@ curl_exec#http://www.baidu.com
 
 除了 HTML 报表，run 数据还可以导出到浏览器之外：
 
-- **火焰图** — `xhprof_html/flamegraph.php` 为一次 run 渲染火焰图。这是**近似视图**：xhprof 存储的是聚合后的 `caller==>callee` 边，而不是逐次调用帧，因此每个函数的 inclusive 指标会按各出边的占比分摊到它的各个调用上，剩余部分计为自身耗时。火焰块宽度是可信的，聚合边之下的拆分只是估算。窄于整条 run 的 `?threshold=<0..1>`（默认 0.01）的火焰块会折叠进 `(others)` 帧。
+- **火焰图** — `xhprof_html/flamegraph.php` 为一次 run 渲染火焰图，页面会标明当前是哪种视图。**分层 run 为近似视图**（横幅：*Approximate*）：xhprof 存储的是聚合后的 `caller==>callee` 边，而不是逐次调用帧，因此每个函数的 inclusive 指标会按各出边的占比分摊到它的各个调用上，剩余部分计为自身耗时 —— 火焰块宽度是可信的，聚合边之下的拆分只是估算。**采样 run 为精确视图**（横幅：*Sampled flame graph (exact)*）：每个采样点就是一条完整调用栈，火焰块宽度是真实携带它的采样数，只有采样真正走过的路径才会出现。窄于整条 run 的 `?threshold=<0..1>`（默认 0.01）的火焰块会折叠进 `(others)` 帧。
 - **Callgrind** — 将 run 导出为 callgrind 格式，用 [KCachegrind](https://apps.kde.org/kcachegrind/) 或 QCachegrind 打开，做源码级/被调方分析。
 - **JSON / CSV** — flat 报表的机器可读导出，便于脚本、看板或自建 diff。
 
-所有导出都能从报表页面的 **Export** 链接进入（**Export**：Flame Graph (approximate) | JSON | CSV | callgrind）；直接 URL 形如 `report.php?format=json`、`report.php?format=csv`、`report.php?format=callgrind`。
+所有导出都能从报表页面的 **Export** 链接进入（**Export**：Flame Graph (approximate) | JSON | CSV | callgrind）—— 火焰图链接保留 *approximate* 标签，但采样 run 打开的是精确视图。直接 URL 形如 `report.php?format=json`、`report.php?format=csv`、`report.php?format=callgrind`；`report.php?format=folded`（仅限采样 run）按标准火焰图工具格式输出，每个不同的栈一行 `frame;frame;... <sample count>`，非采样 run 会返回 400。
 
 # XHGui recipe
 
-[XHGui](https://github.com/perftools/xhgui) 把 xhprof 的 run 存入 MongoDB，并提供长期聚合的 UI。这套对接由 perftools 项目维护，不在本仓库内 —— xhprof 只需要提供扩展：
+[XHGui](https://github.com/perftools/xhgui) 在 xhprof run 之上提供长期聚合的 UI。这套对接由持续维护的 [perftools/php-profiler](https://github.com/perftools/php-profiler) 包负责，不在本仓库内 —— xhprof 只需要提供扩展：
 
 ```sh
-pecl install xhprof                        # 本扩展
-composer require perftools/php-profiler perftools/xhgui-collector
+pecl install xhprof                    # 本扩展；PECL 上是 2.3.10，2.3.11+ 需从源码安装
+composer require perftools/php-profiler
 ```
+
+## 上传方案（推荐）: upload saver
+
+php-profiler 以 JSON 形式把每次剖析 POST 到 XHGui 的 `/run/import` 端点：
 
 ```php
 <?php
@@ -224,15 +242,39 @@ composer require perftools/php-profiler perftools/xhgui-collector
 // php-profiler 会自动探测已加载的剖析扩展；完整选项见其 README
 // （https://github.com/perftools/php-profiler）。
 return [
-    'profiler.enable'      => function () { return true; },
-    'profiler.flags'       => [XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY],
-    'save.handler'         => 'mongodb',
-    'save.handler.mongodb' => [
-        'dsn'      => 'mongodb://127.0.0.1:27017',
-        'database' => 'xhprof',
+    'profiler.enable'     => function () { return true; },
+    'profiler.flags'      => [XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY],
+    'save.handler'        => 'upload',
+    'save.handler.upload' => [
+        'url'   => 'https://xhgui.example.com/run/import',
+        // 必须与 XHGui 的 'upload.token' 配置一致；以 ?token= 查询参数发送。
+        // 仅当 XHGui 未配置 upload.token 时才可以省略。
+        'token' => 'change-me',
     ],
 ];
 ```
+
+URL 应指向带 IP 白名单的 HTTPS 端点：能访问该地址并持有 token 的人都可以注入剖析数据。
+
+## 文件方案 + 离线导入: file saver
+
+被剖析的应用无法直连 XHGui 时，先把 jsonlines 写到本地文件再导入 —— 同样只需这一个 composer 包：
+
+```php
+    'save.handler'      => 'file',
+    'save.handler.file' => ['filename' => '/tmp/xhgui.data.jsonl'],
+```
+
+```sh
+# 在 XHGui 代码库中执行
+php external/import.php -f /tmp/xhgui.data.jsonl
+```
+
+同一个文件导入两次会产生重复的 profile，只需导入一次。
+
+## PHP 8 下不再支持直连 MongoDB
+
+旧的 `save.handler => 'mongodb'` 配方（配合 `perftools/xhgui-collector`）在 PHP 8 下不可用：它依赖经已废弃的 `alcaeus/mongo-php-adapter` 提供的 legacy `MongoClient`，而 `xhgui-collector` 本身已归档（上游也已把 MongoDB saver 标记为 "discouraged"）。请使用上面两种方案之一。
 
 # CLI 报表与 diff 门禁
 

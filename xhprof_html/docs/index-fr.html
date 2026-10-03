@@ -48,13 +48,23 @@ inclut les valeurs par appel.</li>
 optionnelle <code>wts=20,30,50</code> (un poids par run).</li>
 <li><b>Callgraph</b> — image générée par Graphviz <code>dot</code> (chemin
 critique mis en évidence).</li>
-<li><b>Graphe de flammes — vue approximative</b> — xhprof ne conserve que des
-données agrégées appelant&nbsp;→&nbsp;appelé, pas les frames d’appel : les
-largeurs des cadres sont des estimations et non des frames exactes. Ce graphe
-sert d’aperçu de navigation ; les chiffres exacts sont dans les rapports
-tabulaire et parent/enfant.</li>
-<li><b>Exports</b> — JSON, CSV et callgrind :
-<code>report.php?run=&lt;id&gt;&amp;source=&lt;source&gt;&amp;format=json|csv|callgrind</code>.</li>
+<li><b>Graphe de flammes — approximatif pour les runs hiérarchiques</b> —
+xhprof ne conserve que des données agrégées appelant&nbsp;→&nbsp;appelé, pas les
+frames d’appel : les largeurs des cadres sont des estimations et non des frames
+exactes. Ce graphe sert d’aperçu de navigation ; les chiffres exacts sont dans
+les rapports tabulaire et parent/enfant. Un run collecté en mode
+d’échantillonage donne en revanche une vue <b>exacte</b> : chaque échantillon
+est une pile d’appels complète, donc la largeur d’un cadre est le nombre exact
+d’échantillons qui l’ont traversé. La bannière indique la vue affichée —
+<b>Approximate flame graph</b> pour un run hiérarchique, <b>Sampled flame graph
+(exact)</b> pour un run échantillonné.</li>
+<li><b>Exports</b> — JSON, CSV, callgrind et folded :
+<code>report.php?run=&lt;id&gt;&amp;source=&lt;source&gt;&amp;format=json|csv|callgrind|folded</code>.
+<code>format=folded</code> (runs en mode d’échantillonage uniquement) écrit une
+ligne <code>cadre;cadre;… &lt;nombre d’échantillons&gt;</code> par pile
+distincte, prête pour les outils habituels de graphes de flammes ; pour un run
+non échantillonné la réponse est <code>400</code>. Ce format n’est pas encore
+lié depuis la page de rapport — utilisez l’URL directement.</li>
 <li><b>Outils en ligne de commande</b> — <code>bin/xhprofile</code> (profiler un
 script), <code>bin/xhprof-report</code> (rapport tabulaire au terminal),
 <code>bin/xhprof-diff</code> (détection de régression, code de sortie non nul
@@ -768,10 +778,13 @@ graphique beaucoup trop gros. Vous pouvez donc utiliser la fonction <code>xhprof
 <li><a name="dependencies"><h2>Dependances</h2></a></li>
 
 <ul>
-<li><b>JQuery Javascript</b>: Pour les bulles d’aides et les noms de fonctions de pile, 
-nous utilisons la librairie Javascript, JQuery. JQuery est disponible sous les licences MIT et GPL
-(http://docs.jquery.com/Licensing). Ce code JQuery, utilisé par XHProf, se trouve dans le 
-sous répertoire <code>xhprof_html/jquery</code>.
+<li><b>Javascript du rapport</b>: les bulles d’aides, l’auto-complétion du champ
+« jump to function » et le graphe de flammes sont maintenant écrits en Javascript
+natif, sans dépendance tierce. Les scripts se trouvent dans le répertoire
+<code>xhprof_html/js</code> (<code>xhprof_report.js</code>,
+<code>flamegraph.js</code>) et les styles dans
+<code>xhprof_html/css/xhprof.css</code>. L’ancienne copie embarquée de jQuery a
+été retirée.
 
 <li><b>dot (utilitaire de génération d’image):</b> Le fonctionnalité de rendu graphique
 ([View Callgraph]) est présente grâce à la présence de Graphviz "dot" dans votre path. 

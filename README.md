@@ -6,7 +6,7 @@
 
 XHProf is a function-level hierarchical profiler for PHP. The raw data collection component is implemented in C (as a PHP extension); the reporting/UI layer is all in PHP. It reports function-level inclusive and exclusive wall times, memory usage, CPU times and the number of calls for each function, and can compare two runs (hierarchical DIFF reports) or aggregate results from multiple runs.
 
-Around that core this repository ships a complete toolchain: a web UI with a run list and one-click compare (flat, parent-child, DIFF and aggregate reports), a callgraph and an *approximate* flame graph view; callgrind, JSON and CSV exports; CLI tools (`bin/xhprofile`, `bin/xhprof-report`, and `bin/xhprof-diff` as a CI regression gate); a one-command Docker demo; and the `xhprof.profiler=0` gate that keeps the extension loaded at roughly the cost of not loading it. Supported on PHP 7.2 through 8.6.
+Around that core this repository ships a complete toolchain: a web UI with a run list and one-click compare (flat, parent-child, DIFF and aggregate reports), a callgraph and a flame graph view (*approximate* for hierarchical runs, exact for sampled ones); callgrind, JSON, CSV and folded-stack exports; CLI tools (`bin/xhprofile`, `bin/xhprof-report`, and `bin/xhprof-diff` as a CI regression gate); a one-command Docker demo; and the `xhprof.profiler=0` gate that keeps the extension loaded at roughly the cost of not loading it. Supported on PHP 7.2 through 8.6.
 
 # Why xhprof
 - **Nothing leaves your machine.** Profiles are written to your `xhprof.output_dir` and stay there — no service, no upload, no telemetry.
@@ -29,7 +29,19 @@ Who produces the data and who consumes it. `extension/` (C) produces the flat ca
 
 <p align="center"><img src="resource/xhprof-features.svg" alt="XHProf feature matrix: profiling, sampling, metrics, compare, DIFF, aggregate, callgraph, flame graph, exports, CLI, Docker, XHGui" width="900"></p>
 
-One box per capability: exact hierarchical profiling and sampling, the five metrics, run list with one-click compare, hierarchical DIFF, aggregate, callgraph, the approximate flame graph, the three export formats, the CLI regression gate, the Docker demo and XHGui integration — plus the two properties that apply to all of them, PHP 7.2–8.6 support and the `xhprof.profiler` gate.
+One box per capability: exact hierarchical profiling and sampling, the five metrics, run list with one-click compare, hierarchical DIFF, aggregate, callgraph, the flame graph (approximate for hierarchical runs, exact for sampled ones), the four export formats, the CLI regression gate, the Docker demo and XHGui integration — plus the two properties that apply to all of them, PHP 7.2–8.6 support and the `xhprof.profiler` gate.
+
+Two of those views in the browser (screenshots from the Docker demo data):
+
+<p align="center">
+  <img src="xhprof_html/docs/sample-diff-report-flat-view.jpg" alt="XHProf DIFF report: overall diff summary and the top regressions/improvements sorted by inclusive wall time" width="900"><br>
+  <em>DIFF report — two runs compared: overall diff summary plus the top regressions/improvements by inclusive wall-time diff.</em>
+</p>
+
+<p align="center">
+  <img src="xhprof_html/docs/sample-flamegraph.jpg" alt="XHProf approximate flame graph of a run" width="900"><br>
+  <em>Approximate flame graph (hierarchical run) — frame widths are correct, but the split below an aggregated edge is an estimate.</em>
+</p>
 
 # Lifecycle
 
@@ -48,7 +60,7 @@ xhprof/
 │   │                     #   callgraph_utils, xhprof_callgrind
 │   └── display/          # the report renderer (xhprof.php)
 ├── xhprof_html/          # the web UI: index.php, report.php, callgraph.php, flamegraph.php
-│   ├── css/ js/ jquery/  # styles, report + flamegraph scripts, bundled jQuery
+│   ├── css/ js/          # stylesheet and the native report + flamegraph scripts
 │   └── docs/             # user guide (index.html, index-fr.html) and screenshots
 ├── bin/                  # CLI: xhprofile (profile a script), xhprof-report, xhprof-diff
 ├── scripts/              # release script and the sampling wrapper (xhprofile.php)
@@ -88,6 +100,8 @@ The UI itself — run list and compare, flat / parent-child / diff reports, aggr
 ```sh
 pecl install xhprof
 ```
+
+> **Release channel note:** PECL's newest xhprof release is 2.3.10 (July 2024). The security fixes and features added from 2.3.11 onward live in this repository only — build from source (below) to get them.
 
 ## Build from source
 ```
@@ -203,20 +217,24 @@ curl_exec#http://www.baidu.com
 
 Besides the HTML report, a run can leave the browser:
 
-- **Flame graph** — `xhprof_html/flamegraph.php` renders a flame graph for a run. This is an **approximate view**: xhprof stores aggregated `caller==>callee` edges, not individual call frames, so each function's inclusive metric is apportioned over its outgoing calls by each edge's share, and the remainder becomes its self time. Frame widths are sound; the split below an aggregated edge is an estimate. Frames narrower than `?threshold=<0..1>` of the run (default 0.01) are folded into an `(others)` frame.
+- **Flame graph** — `xhprof_html/flamegraph.php` renders a flame graph for a run, and the page says which kind you are looking at. A **hierarchical run is the approximate view** (banner: *Approximate*): xhprof stores aggregated `caller==>callee` edges, not individual call frames, so each function's inclusive metric is apportioned over its outgoing calls by each edge's share, and the remainder becomes its self time — frame widths are sound, the split below an aggregated edge is an estimate. A **sampling-mode run is exact** (banner: *Sampled flame graph (exact)*): every sample is one whole call stack, so a frame's width is the exact number of samples that carried it and a path exists only when a sample really took it. Frames narrower than `?threshold=<0..1>` of the run (default 0.01) are folded into an `(others)` frame.
 - **Callgrind** — export a run in callgrind format and open it in [KCachegrind](https://apps.kde.org/kcachegrind/) or QCachegrind for source/callee-level analysis.
 - **JSON / CSV** — machine-readable exports of the flat report, for scripts, dashboards or your own diffing.
 
-Every export is linked from the report page (**Export**: Flame Graph (approximate) | JSON | CSV | callgrind); direct URLs look like `report.php?format=json`, `report.php?format=csv` and `report.php?format=callgrind`.
+Every export is linked from the report page (**Export**: Flame Graph (approximate) | JSON | CSV | callgrind) — the flame-graph link keeps the *approximate* label, but a sampled run opens the exact view. Direct URLs look like `report.php?format=json`, `report.php?format=csv` and `report.php?format=callgrind`; `report.php?format=folded` (sampling-mode runs only) writes one `frame;frame;... <sample count>` line per distinct stack for standard flame-graph tooling, and answers 400 for a run that was not sampled.
 
 # XHGui recipe
 
-[XHGui](https://github.com/perftools/xhgui) keeps xhprof runs in MongoDB and adds a long-term, aggregating UI. The glue is maintained by the perftools project, not in this repository — xhprof only has to supply the extension:
+[XHGui](https://github.com/perftools/xhgui) adds a long-term, aggregating UI on top of xhprof runs. The glue is the maintained [perftools/php-profiler](https://github.com/perftools/php-profiler) package, not this repository — xhprof only has to supply the extension:
 
 ```sh
-pecl install xhprof                        # this extension
-composer require perftools/php-profiler perftools/xhgui-collector
+pecl install xhprof                    # this extension; PECL serves 2.3.10, for 2.3.11+ build from source
+composer require perftools/php-profiler
 ```
+
+## Upload saver (recommended)
+
+php-profiler POSTs each profile to XHGui's `/run/import` endpoint as JSON:
 
 ```php
 <?php
@@ -224,15 +242,39 @@ composer require perftools/php-profiler perftools/xhgui-collector
 // php-profiler auto-detects the loaded profiler extension; see its README
 // (https://github.com/perftools/php-profiler) for the full option list.
 return [
-    'profiler.enable'      => function () { return true; },
-    'profiler.flags'       => [XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY],
-    'save.handler'         => 'mongodb',
-    'save.handler.mongodb' => [
-        'dsn'      => 'mongodb://127.0.0.1:27017',
-        'database' => 'xhprof',
+    'profiler.enable'     => function () { return true; },
+    'profiler.flags'      => [XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY],
+    'save.handler'        => 'upload',
+    'save.handler.upload' => [
+        'url'   => 'https://xhgui.example.com/run/import',
+        // Must match the 'upload.token' config in XHGui; sent as a ?token= query
+        // parameter. Leave it out only if XHGui has no upload.token set.
+        'token' => 'change-me',
     ],
 ];
 ```
+
+Point the URL at an HTTPS endpoint with an IP allow-list: anyone who can reach it with the token can inject profiles.
+
+## File saver + offline import
+
+If the profiled application cannot reach XHGui, write jsonlines locally and import later — same single composer package:
+
+```php
+    'save.handler'      => 'file',
+    'save.handler.file' => ['filename' => '/tmp/xhgui.data.jsonl'],
+```
+
+```sh
+# from the XHGui checkout
+php external/import.php -f /tmp/xhgui.data.jsonl
+```
+
+Importing the same file twice creates duplicate profiles, so import it once.
+
+## Direct MongoDB is not available on PHP 8
+
+The old `save.handler => 'mongodb'` recipe (with `perftools/xhgui-collector`) does not work on PHP 8: it needs the legacy `MongoClient` through the deprecated `alcaeus/mongo-php-adapter`, and `xhgui-collector` itself is archived (upstream now marks the MongoDB saver "discouraged"). Use one of the two savers above.
 
 # CLI reports and diff gate
 

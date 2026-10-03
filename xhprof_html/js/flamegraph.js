@@ -19,8 +19,9 @@
  * Expects window.xhprof_flamegraph_data to hold a nested tree of
  * {n: name, w: width, s: self, c: [children]}. Frames are SVG rects:
  * hover shows the function name and width, clicking a frame zooms into
- * it, and the breadcrumb above the graph zooms back out. Root is drawn
- * at the bottom, like a classic flame graph.
+ * it, and the breadcrumb above the graph zooms back out. Breadcrumb
+ * segments (except the root and "(others)") also link to that frame's
+ * report page. Root is drawn at the bottom, like a classic flame graph.
  */
 (function () {
   var data = window.xhprof_flamegraph_data;
@@ -39,6 +40,21 @@
   // zoom path: path[path.length - 1] is the frame currently filling the
   // graph.
   var path = [data];
+
+  // run/source for the breadcrumb links back to the report pages: the page
+  // URL already carries them (flamegraph.php?run=..&source=..).
+  function queryParam(name) {
+    var pairs = (location.search || '').replace(/^\?/, '').split('&');
+    for (var i = 0; i < pairs.length; i++) {
+      var kv = pairs[i].split('=');
+      if (decodeURIComponent(kv[0] || '') === name) {
+        return decodeURIComponent((kv[1] || '').replace(/\+/g, ' '));
+      }
+    }
+    return '';
+  }
+  var run = queryParam('run');
+  var source = queryParam('source');
 
   function current() {
     return path[path.length - 1];
@@ -127,14 +143,27 @@
     crumb.innerHTML = '';
     for (var i = 0; i < path.length; i++) {
       (function (idx) {
-        var span = document.createElement('span');
-        span.appendChild(document.createTextNode(path[idx].n));
-        span.title = 'zoom to ' + path[idx].n;
-        span.onclick = function () {
-          path = path.slice(0, idx + 1);
-          render();
-        };
-        crumb.appendChild(span);
+        var name = path[idx].n;
+        var segment;
+        // the root and the synthetic "(others)" frame have no report of
+        // their own: they stay plain zoom targets. Every real frame links
+        // to its parent/child report.
+        if (idx > 0 && name !== '(others)' && run !== '') {
+          segment = document.createElement('a');
+          segment.href = 'index.php?run=' + encodeURIComponent(run)
+            + '&source=' + encodeURIComponent(source)
+            + '&symbol=' + encodeURIComponent(name);
+          segment.title = 'open the report for ' + name;
+        } else {
+          segment = document.createElement('span');
+          segment.title = 'zoom to ' + name;
+          segment.onclick = function () {
+            path = path.slice(0, idx + 1);
+            render();
+          };
+        }
+        segment.appendChild(document.createTextNode(name));
+        crumb.appendChild(segment);
       })(i);
       if (i < path.length - 1) {
         crumb.appendChild(document.createTextNode(' > '));

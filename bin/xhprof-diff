@@ -26,6 +26,10 @@
  * baseline and are listed as "new" but never fail the gate on their own,
  * their cost shows up in the callers that do get measured.
  *
+ * With --relative a function is judged by its share of the run's total wt
+ * instead of its absolute wt, so a machine-wide slowdown (every function
+ * equally slower) no longer reads as a regression.
+ *
  * usage: xhprof-diff [options] <old> <new>
  *
  * exit status: 0 = nothing regressed over the threshold
@@ -37,8 +41,14 @@ require_once dirname(dirname(__FILE__)) . '/xhprof_lib/display/xhprof.php';
 
 $usage = "usage: xhprof-diff [options] <old> <new>\n"
   . "\n"
-  . "  --threshold PCT  fail when a function's wt grows by more than PCT%\n"
-  . "                   of its baseline value (default: 5)\n"
+  . "  --threshold PCT  fail when a function grows by more than PCT% of its\n"
+  . "                   baseline value (default: 5)\n"
+  . "  --relative       judge a function by its share of the run's total wt\n"
+  . "                   instead of its absolute wt: right when the whole\n"
+  . "                   machine can be slower (shared CI host, noisy\n"
+  . "                   neighbour) and only the distribution over functions\n"
+  . "                   matters. Absolute (the default) is right when the\n"
+  . "                   total wt of the run should not change either.\n"
   . "  --limit N        rows to list (default: 20)\n"
   . "  --source NAME    run namespace for run ids (default: xhprof)\n"
   . "  -h, --help\n"
@@ -52,7 +62,8 @@ $usage = "usage: xhprof-diff [options] <old> <new>\n"
   . "\n"
   . "Note: two runs of the same code on a busy machine can differ by tens of\n"
   . "percent, so pick a threshold above the run-to-run variance you see on\n"
-  . "the machine, and compare runs taken under the same conditions.\n";
+  . "the machine, and compare runs taken under the same conditions. Use\n"
+  . "--relative when the machine itself cannot be kept steady.\n";
 
 /**
  * Read one side of the comparison: a run file if the argument names one,
@@ -87,7 +98,8 @@ function xhprof_diff_load($arg, $source, &$label) {
   return $raw_data;
 }
 
-$options = getopt('h', array('threshold:', 'limit:', 'source:', 'help'),
+$options = getopt('h',
+                  array('threshold:', 'limit:', 'source:', 'relative', 'help'),
                   $rest_index);
 
 if (isset($options['h']) || isset($options['help'])) {
@@ -151,6 +163,14 @@ init_metrics($diff_data, '', 'wt', true);
 $diff_totals = array();
 $diff_flat = xhprof_compute_flat_info($diff_data, $diff_totals);
 
+$total_old = isset($old_totals['wt']) ? $old_totals['wt'] : 0;
+$total_new = isset($new_totals['wt']) ? $new_totals['wt'] : 0;
+
+// --relative needs both totals to divide by; a run without wt falls back to
+// the absolute comparison.
+$relative = isset($options['relative']) && ($total_old > 0) && ($total_new > 0);
+$basis_label = $relative ? 'share of total wt' : 'wt';
+
 $rows = array();
 $failures = array();
 foreach ($diff_flat as $symbol => $info) {
@@ -158,20 +178,31 @@ foreach ($diff_flat as $symbol => $info) {
   $old_wt = isset($old_flat[$symbol]['wt']) ? $old_flat[$symbol]['wt'] : 0;
   $new_wt = isset($new_flat[$symbol]['wt']) ? $new_flat[$symbol]['wt'] : 0;
 
-  $rows[] = array('fn' => $symbol, 'old' => $old_wt, 'new' => $new_wt,
-                  'delta' => $delta);
+  // absolute: growth against the function's own baseline wt. relative:
+  // growth against its baseline share of the run total, so everything
+  // getting uniformly slower leaves every share where it was.
+  if ($relative) {
+    $old_basis = 100.0 * $old_wt / $total_old;
+    $new_basis = 100.0 * $new_wt / $total_new;
+  } else {
+    $old_basis = $old_wt;
+    $new_basis = $new_wt;
+  }
+  // signed, so the "change" column reads the same in both modes
+  $change = ($old_basis > 0) ?
+    100.0 * ($new_basis - $old_basis) / $old_basis : null;
 
-  if ($delta <= 0 || $old_wt <= 0) {
+  $rows[] = array('fn' => $symbol, 'old' => $old_wt, 'new' => $new_wt,
+                  'delta' => $delta, 'change' => $change);
+
+  if ($change === null || $change <= $threshold) {
     // nothing grew, or there is no baseline to measure the growth against
     // (a function the old run never called: its cost shows up in its
     // callers, which the gate does measure).
     continue;
   }
-  $growth = 100.0 * $delta / $old_wt;
-  if ($growth > $threshold) {
-    $failures[] = array('fn' => $symbol, 'old' => $old_wt, 'new' => $new_wt,
-                        'delta' => $delta, 'growth' => $growth);
-  }
+  $failures[] = array('fn' => $symbol, 'old' => $old_wt, 'new' => $new_wt,
+                      'delta' => $delta, 'growth' => $change);
 }
 
 // biggest regression first; the function name breaks ties so that the output
@@ -188,9 +219,11 @@ array_multisort($sort_delta, SORT_DESC, SORT_NUMERIC,
 
 echo "old: " . $old_label . "\n";
 echo "new: " . $new_label . "\n";
+if ($relative) {
+  echo "mode: relative (each function's share of the run's total wt; a "
+     . "machine-wide slowdown is not a regression)\n";
+}
 
-$total_old = isset($old_totals['wt']) ? $old_totals['wt'] : 0;
-$total_new = isset($new_totals['wt']) ? $new_totals['wt'] : 0;
 printf("total wt: %s -> %s (%s)\n", xhprof_count_format($total_old),
        xhprof_count_format($total_new),
        ($total_old > 0) ? sprintf('%+.1f%%',
@@ -205,8 +238,8 @@ $format = "%-60s %14s %14s %14s %10s\n";
 printf($format, 'fn', 'old wt', 'new wt', 'delta', 'change');
 for ($i = 0; $i < $printed; $i++) {
   $row = $rows[$i];
-  if ($row['old'] > 0) {
-    $change = sprintf('%+.1f%%', 100.0 * $row['delta'] / $row['old']);
+  if ($row['change'] !== null) {
+    $change = sprintf('%+.1f%%', $row['change']);
   } else {
     $change = ($row['new'] > 0) ? 'new' : '-';
   }
@@ -216,8 +249,8 @@ for ($i = 0; $i < $printed; $i++) {
 }
 
 if (!count($failures)) {
-  printf("\nOK: no function grew by more than %s%% of its baseline wt\n",
-         rtrim(rtrim(sprintf('%.2f', $threshold), '0'), '.'));
+  printf("\nOK: no function grew by more than %s%% of its baseline %s\n",
+         rtrim(rtrim(sprintf('%.2f', $threshold), '0'), '.'), $basis_label);
   exit(0);
 }
 

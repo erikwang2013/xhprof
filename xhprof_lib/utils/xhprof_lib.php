@@ -155,7 +155,10 @@ function xhprof_parse_parent_child($parent_child) {
     return $ret;
   }
 
-  return array(null, $ret[0]);
+  // a bare entry (e.g. "main()") has no parent: use "" rather than null so
+  // callers can safely use it as an array key (PHP 8.5 deprecates null
+  // offsets). "" is falsy, exactly like null was, for the parent checks.
+  return array('', $ret[0]);
 }
 
 /**
@@ -221,6 +224,69 @@ function xhprof_valid_run($run_id, $raw_data) {
   return true;
 }
 
+
+/**
+ * Fold a sampling profiler run into the shape the reports work on.
+ *
+ * xhprof_sample_enable() stores one entry per sample: the key is the sample
+ * time ("<sec>.<microsec>") and the value the call stack at that moment,
+ * e.g. "main()==>foo==>bar". The reports are built around parent/child
+ * edges, so every stack is folded into one "samples" count per edge between
+ * adjacent frames; the bare "main()" entry carries the total number of
+ * samples (the same "total" role "wt" plays for instrumented runs).
+ * No "ct" is written: sampled runs go down the display_calls=false report
+ * path, like runs from the C++ profiler.
+ *
+ * Anything that does not look like a sampled run (an empty array, or one
+ * with non string values) is returned unchanged.
+ *
+ * @param  array  $raw_data  raw XHProf data
+ *
+ * @return array  folded data (or $raw_data unchanged)
+ */
+function xhprof_expand_sampled_run($raw_data) {
+
+  if (!is_array($raw_data) || empty($raw_data)) {
+    return $raw_data;
+  }
+
+  foreach ($raw_data as $stack) {
+    if (!is_string($stack)) {
+      return $raw_data;
+    }
+  }
+
+  $samples = array("main()" => array("samples" => 0));
+  $total = 0;
+
+  foreach ($raw_data as $stack) {
+    $frames = explode("==>", $stack);
+    $last = count($frames) - 1;
+
+    for ($i = 0; $i < $last; $i++) {
+      $parent = $frames[$i];
+      $child = $frames[$i + 1];
+      // crafted stacks can make a frame its own parent; the reports treat
+      // that as corrupt data, so drop the edge here already.
+      if ($parent === '' || $child === '' || $parent === $child) {
+        continue;
+      }
+      $key = $parent . "==>" . $child;
+      if (!isset($samples[$key])) {
+        $samples[$key] = array("samples" => 0);
+      }
+      $samples[$key]["samples"]++;
+    }
+
+    $total++;
+  }
+
+  // a sample is counted once for the whole run: a single frame stack
+  // ("main()") is already part of this total and is not added again.
+  $samples["main()"]["samples"] = $total;
+
+  return $samples;
+}
 
 /**
  * Normalize the shape of a raw XHProf run before it is used.
@@ -458,13 +524,16 @@ function xhprof_aggregate_runs($xhprof_runs_impl, $runs,
         }
       }
 
+      // the metrics come from the first valid run: a run aggregated with it
+      // may not carry all of them (wt only vs wt/cpu/mu). A metric the run
+      // does not have counts as 0 here, like a missing "ct" does.
       if (!isset($raw_data_total[$parent_child])) {
         foreach ($metrics as $metric) {
-          $raw_data_total[$parent_child][$metric] = ($wt * $info[$metric]);
+          $raw_data_total[$parent_child][$metric] = ($wt * ($info[$metric] ?? 0));
         }
       } else {
         foreach ($metrics as $metric) {
-          $raw_data_total[$parent_child][$metric] += ($wt * $info[$metric]);
+          $raw_data_total[$parent_child][$metric] += ($wt * ($info[$metric] ?? 0));
         }
       }
     }
@@ -529,7 +598,9 @@ function xhprof_compute_flat_info($raw_data, &$overall_totals) {
 
   /* total metric value is the metric value for "main()" */
   foreach ($metrics as $metric) {
-    $overall_totals[$metric] = $symbol_tab["main()"][$metric];
+    // a degenerate run (e.g. one reduced to nothing by the self-loop guard)
+    // has no main() row at all; report 0 rather than warn on the read.
+    $overall_totals[$metric] = $symbol_tab["main()"][$metric] ?? 0;
   }
 
   /*
@@ -594,12 +665,18 @@ function xhprof_compute_diff($xhprof_data1, $xhprof_data2) {
       }
     }
 
+    // the metrics come from run2: run1 may carry fewer of them (a wt only
+    // baseline against a wt/cpu/mu run), and an entry of run2 itself may
+    // lack one (a sampled run has no "ct"). What the run does not have
+    // counts as 0 on either side.
     if ($display_calls) {
-      $xhprof_delta[$parent_child]["ct"] -= $info["ct"];
+      $xhprof_delta[$parent_child]["ct"] =
+        ($xhprof_delta[$parent_child]["ct"] ?? 0) - ($info["ct"] ?? 0);
     }
 
     foreach ($metrics as $metric) {
-      $xhprof_delta[$parent_child][$metric] -= $info[$metric];
+      $xhprof_delta[$parent_child][$metric] =
+        ($xhprof_delta[$parent_child][$metric] ?? 0) - ($info[$metric] ?? 0);
     }
   }
 
@@ -644,13 +721,15 @@ function xhprof_compute_inclusive_times($raw_data) {
        * calls a unique recursion-depth appended name (for example, foo@1).
        */
       xhprof_error("Error in Raw Data: parent & child are both: $parent");
-      return;
+      return array();
     }
 
     if (!isset($symbol_tab[$child])) {
 
       if ($display_calls) {
-        $symbol_tab[$child] = array("ct" => $info["ct"]);
+        // a run without call counts (sampled / C++ profiler data) has no
+        // "ct" to read; report 0 rather than blowing up on the missing key.
+        $symbol_tab[$child] = array("ct" => $info["ct"] ?? 0);
       } else {
         $symbol_tab[$child] = array();
       }
@@ -660,7 +739,7 @@ function xhprof_compute_inclusive_times($raw_data) {
     } else {
       if ($display_calls) {
         /* increment call count for this child */
-        $symbol_tab[$child]["ct"] += $info["ct"];
+        $symbol_tab[$child]["ct"] += $info["ct"] ?? 0;
       }
 
       /* update inclusive times/metric for this child  */
@@ -1010,11 +1089,19 @@ function xhprof_get_matching_functions($q, $xhprof_data, $limit = 50) {
   $infix_matches = array();
 
   foreach ($xhprof_data as $parent_child => $info) {
+    // cheap prefilter: a name can only match if the whole key matches, so
+    // most keys (a big run has thousands) are dropped without splitting
+    // them up. A match spanning "==>" is still decided by the per-name
+    // checks below, so the result is the same either way.
+    if (stripos($parent_child, $q) === false) {
+      continue;
+    }
+
     list($parent, $child) = xhprof_parse_parent_child($parent_child);
 
     // a bare entry ("main()") has no parent
     foreach (array($parent, $child) as $name) {
-      if ($name === null) {
+      if ($name === null || $name === '') {
         continue;
       }
       if (stripos($name, $q) === 0) {

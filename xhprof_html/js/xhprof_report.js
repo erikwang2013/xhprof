@@ -178,29 +178,288 @@ function ChildRowToolTip(cell, metric)
   return s;
 }
 
-$(document).ready(function() {
-  // NOTE: 'td[metric]' (not the XPath-ish 'td[@metric]' jQuery 1.1 syntax)
-  // so a newer jQuery can be dropped in without losing the tooltips.
-  $('td[metric]').tooltip(
-    { bodyHandler: function() {
-          var type = $(this).attr('type');
-          var metric = $(this).attr('metric');
-          if (type == 'Parent') {
-             return ParentRowToolTip(this, metric);
-          } else if (type == 'Child') {
-             return ChildRowToolTip(this, metric);
-          }
-      },
-      showURL : false
-    });
-  var cur_params = {} ;
-  $.each(location.search.replace('?','').split('&'), function(i, x) {
-    var y = x.split('='); cur_params[y[0]] = y[1];
+// Tooltip for the metric cells of the parent/child report. Replaces the
+// jQuery Tooltip plugin: one absolutely positioned #tooltip div, shown after
+// a short delay, flipped back over the cursor when it would leave the
+// viewport.
+function initMetricTooltip() {
+  var tip = document.createElement('div');
+  tip.id = 'tooltip';
+  tip.style.display = 'none';
+  var body = document.createElement('div');
+  body.className = 'body';
+  tip.appendChild(body);
+  document.body.appendChild(tip);
+
+  var current = null;
+  var timer = null;
+  var x = 0;
+  var y = 0;
+
+  function show() {
+    timer = null;
+    var type = current.getAttribute('type');
+    var metric = current.getAttribute('metric');
+    if (type == 'Parent') {
+      body.innerHTML = ParentRowToolTip(current, metric);
+    } else if (type == 'Child') {
+      body.innerHTML = ChildRowToolTip(current, metric);
+    } else {
+      return;
+    }
+    // lay out before measuring, then flip when the tip overflows the viewport
+    tip.style.visibility = 'hidden';
+    tip.style.display = 'block';
+    tip.style.left = (x + 15) + 'px';
+    tip.style.top = (y + 15) + 'px';
+    var w = tip.offsetWidth;
+    var h = tip.offsetHeight;
+    if (x + 15 + w > window.scrollX + document.documentElement.clientWidth) {
+      tip.style.left = (x - w - 20) + 'px';
+    }
+    if (y + 15 + h > window.scrollY + document.documentElement.clientHeight) {
+      tip.style.top = (y - h - 20) + 'px';
+    }
+    tip.style.visibility = '';
+  }
+
+  function hide() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    current = null;
+    tip.style.display = 'none';
+  }
+
+  function cellOf(event) {
+    var el = event.target;
+    return (el && el.closest) ? el.closest('td[metric]') : null;
+  }
+
+  document.addEventListener('mouseover', function(event) {
+    var cell = cellOf(event);
+    if (!cell || cell == current) {
+      return;
+    }
+    current = cell;
+    x = event.pageX;
+    y = event.pageY;
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(show, 200);
   });
-  $('input.function_typeahead')
-    .autocomplete('typeahead.php', { extraParams : cur_params })
-    .result(function(event, item) {
-      cur_params['symbol'] = item;
-      location.search = '?' + jQuery.param(cur_params);
-    });
+
+  document.addEventListener('mouseout', function(event) {
+    var cell = cellOf(event);
+    if (!cell || (event.relatedTarget && cell.contains(event.relatedTarget))) {
+      return;
+    }
+    hide();
+  });
+
+  // follow the mouse until the tip is shown, like the old plugin did
+  document.addEventListener('mousemove', function(event) {
+    if (current && timer) {
+      x = event.pageX;
+      y = event.pageY;
+    }
+  });
+
+  document.addEventListener('click', function(event) {
+    if (cellOf(event)) {
+      hide();
+    }
+  });
+}
+
+// Typeahead for the "jump to function" box. Replaces the jQuery Autocomplete
+// plugin. Every keystroke (debounced) asks the server again, because
+// typeahead.php does the matching itself -- it puts prefix matches before
+// mid-name matches, and re-filtering that list on the client (the plugin's
+// matchSubset default) silently drops the mid-name hits as the query gets
+// longer.
+function initFunctionTypeahead() {
+  var input = document.querySelector('input.function_typeahead');
+  if (!input) {
+    return;
+  }
+
+  var box = document.createElement('div');
+  box.className = 'ac_results';
+  box.style.display = 'none';
+  var ul = document.createElement('ul');
+  box.appendChild(ul);
+  document.body.appendChild(box);
+
+  var items = [];
+  var active = -1;
+  var timer = null;
+  var seq = 0;
+
+  function hide() {
+    box.style.display = 'none';
+    active = -1;
+    if (ul.children.length) {
+      mark();
+    }
+  }
+
+  function mark() {
+    var lis = ul.children;
+    for (var i = 0; i < lis.length; i++) {
+      lis[i].className = (i == active) ? 'ac_over' : (i % 2 ? 'ac_odd' : '');
+    }
+    // keep the active item in view, scrolling the list (not the page)
+    if (active >= 0 && ul.clientHeight) {
+      var li = lis[active];
+      if (li.offsetTop < ul.scrollTop) {
+        ul.scrollTop = li.offsetTop;
+      } else if (li.offsetTop + li.offsetHeight > ul.scrollTop + ul.clientHeight) {
+        ul.scrollTop = li.offsetTop + li.offsetHeight - ul.clientHeight;
+      }
+    }
+  }
+
+  function render(li, name, term) {
+    var at = name.toLowerCase().indexOf(term);
+    if (!term || at < 0) {
+      li.appendChild(document.createTextNode(name));
+      return;
+    }
+    li.appendChild(document.createTextNode(name.slice(0, at)));
+    var strong = document.createElement('strong');
+    strong.textContent = name.slice(at, at + term.length);
+    li.appendChild(strong);
+    li.appendChild(document.createTextNode(name.slice(at + term.length)));
+  }
+
+  function fill(names, term) {
+    ul.textContent = '';
+    items = names;
+    for (var i = 0; i < names.length; i++) {
+      var li = document.createElement('li');
+      if (i % 2) {
+        li.className = 'ac_odd';
+      }
+      render(li, names[i], term);
+      ul.appendChild(li);
+    }
+    var rect = input.getBoundingClientRect();
+    box.style.left = (rect.left + window.scrollX) + 'px';
+    box.style.top = (rect.bottom + window.scrollY) + 'px';
+    box.style.width = rect.width + 'px';
+    box.style.display = names.length ? 'block' : 'none';
+    active = names.length ? 0 : -1;  // the first match is pre-selected
+    mark();
+  }
+
+  function move(step) {
+    if (active < 0) {
+      return;
+    }
+    active = (active + step + items.length) % items.length;
+    mark();
+  }
+
+  function suggest() {
+    var term = input.value.trim();
+    if (!term) {
+      hide();
+      return;
+    }
+    var mine = ++seq;
+    var params = new URLSearchParams(location.search);
+    params.set('q', term.toLowerCase());
+    fetch('typeahead.php?' + params.toString())
+      .then(function(response) { return response.text(); })
+      .then(function(text) {
+        if (mine != seq) {
+          return;  // a newer request is already in flight
+        }
+        var names = [];
+        var rows = text.split('\n');
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i].trim();
+          if (row) {
+            names.push(row);
+          }
+        }
+        fill(names, term.toLowerCase());
+      });
+  }
+
+  function select() {
+    if (active < 0 || !items.length) {
+      return false;
+    }
+    var value = items[active];  // read before hide() resets `active`
+    input.value = value;
+    hide();
+    // carry the current query params over, as the old widget did
+    var params = new URLSearchParams(location.search);
+    params.set('symbol', value);
+    location.search = '?' + params.toString();
+    return true;
+  }
+
+  input.addEventListener('input', function() {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(suggest, 250);
+  });
+
+  input.addEventListener('keydown', function(event) {
+    if (event.key == 'ArrowDown' || event.key == 'ArrowUp') {
+      event.preventDefault();
+      if (box.style.display == 'none') {
+        suggest();
+      } else {
+        move(event.key == 'ArrowDown' ? 1 : -1);
+      }
+    } else if (event.key == 'Enter' || event.key == 'Tab') {
+      if (box.style.display != 'none' && select()) {
+        event.preventDefault();
+      }
+    } else if (event.key == 'Escape') {
+      hide();
+    }
+  });
+
+  input.addEventListener('blur', hide);
+
+  // keep the input focused when an item is clicked, else blur() hides the
+  // list before the click lands
+  box.addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+
+  box.addEventListener('mouseover', function(event) {
+    var li = event.target;
+    while (li && li.tagName != 'LI') {
+      li = li.parentNode;
+    }
+    if (li && li.parentNode == ul) {
+      active = Array.prototype.indexOf.call(ul.children, li);
+      mark();
+    }
+  });
+
+  box.addEventListener('click', function(event) {
+    var li = event.target;
+    while (li && li.tagName != 'LI') {
+      li = li.parentNode;
+    }
+    if (li && li.parentNode == ul) {
+      active = Array.prototype.indexOf.call(ul.children, li);
+      select();
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  initMetricTooltip();
+  initFunctionTypeahead();
 });

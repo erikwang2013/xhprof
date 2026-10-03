@@ -276,6 +276,13 @@ navigational overview, and confirm anything interesting in the flat and
 parent/child reports, whose numbers are exact. (The page itself carries the same
 warning.)</div>
 
+<p><b>Sampled runs are exact.</b> A run collected in sampling mode
+(<code>xhprof_sample_enable()</code>) stores whole call stacks, one per sample,
+so this view is not approximated for it: a frame’s width is the exact number of
+samples that carried it, and every path shown is a path a sample really took.
+The banner says which view you are looking at — <b>Approximate flame graph</b>
+for hierarchical runs, <b>Sampled flame graph (exact)</b> for sampled ones.</p>
+
 <p>Open it from the <b>Flame Graph (approximate)</b> link on a run’s report, or
 directly:</p>
 
@@ -309,7 +316,8 @@ have direct URLs too:</p>
 
 <pre><code>report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=json       # JSON
 report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=csv        # CSV (download)
-report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=callgrind  # callgrind (download)</code></pre>
+report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=callgrind  # callgrind (download)
+report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=folded     # folded stacks (sampling-mode runs only, download)</code></pre>
 
 <ul>
 <li><b>JSON</b> — the flat per-function numbers plus the run totals:
@@ -328,6 +336,11 @@ self cost and one <code>cfn=</code> entry per caller&nbsp;→&nbsp;callee edge.
 XHProf records no source positions, so every cost is filed under line 0 and all
 calls between a pair are lumped into one entry — useful for callee-level
 analysis, but not for line-level attribution.</li>
+<li><b>folded</b> — sampling-mode runs only: one
+<code>frame;frame;… &lt;sample count&gt;</code> line per distinct stack, ready
+for the usual flame-graph tooling. It reads the run raw — the stacks live in
+string values — so a run that was not collected in sampling mode gets
+<code>400</code>. The report page does not link it yet; use the URL above.</li>
 </ul>
 
 <div class="warn">Unknown <code>format</code> values fall back to JSON, and a run

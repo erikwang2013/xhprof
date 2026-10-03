@@ -41,10 +41,10 @@
   <active>yes</active>
  </lead>
  <date>2026-10-04</date>
- <time>01:45:00</time>
+ <time>02:20:00</time>
  <version>
-  <release>2.3.13</release>
-  <api>2.3.13</api>
+  <release>2.3.14</release>
+  <api>2.3.14</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,14 +52,25 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - Documentation release on top of 2.3.12 (no functional changes).
-    - User guide rewritten (xhprof_html/docs/index.html): run list, flat /
-      parent-child / DIFF / aggregate reports, callgraph, approximate flame
-      graph, exports, typeahead, CLI tools and an FAQ; fresh screenshots.
-    - README (EN + zh-CN): rewritten intro, architecture / design /
-      features / lifecycle diagrams, project structure map.
-    - Fixed: the compare-selected description now matches the actual
-      behavior (the newer run in the list is the baseline).
+    - Sampling runs are fully supported end to end: folded stacks are
+      folded into the report model on read, the flame graph renders them
+      as an exact "Sampled flame graph (exact)" view, and the new
+      report.php?format=folded export emits folded stacks directly.
+    - Report-layer hardening: PHP 8.5 null-offset deprecations fixed;
+      self-loop and missing-metric data no longer emit warnings; mixed
+      metric runs diff and aggregate cleanly.
+    - bin/xhprof-diff gains --relative (regression measured as share of
+      the run total, immune to machine speed drift); bad ?threshold values
+      fall back to the default on flamegraph and callgraph; callgraph SVGs
+      render on a transparent background.
+    - The bundled jQuery 1.2.6 stack (4.6k lines) is gone: the report page
+      uses native JavaScript (tooltip and typeahead behavior verified
+      identical); reports support dark mode via prefers-color-scheme.
+    - CI: gcov coverage job, weekly valgrind job, the Windows job is no
+      longer non-blocking; a new release workflow attaches the tarball to
+      GitHub releases on tags. New report-layer test suite (140 checks).
+    - Docs: XHGui recipe fixed for PHP 8 (upload/file savers), PECL channel
+      note, sampled-run documentation and dual-mode flame graph docs.
  </notes>
  <contents>
   <dir name="/">
@@ -108,6 +119,7 @@
    <file name="extension/tests/xhprof_023.phpt" role="test" />
    <file name="extension/tests/xhprof_024.phpt" role="test" />
    <file name="extension/tests/xhprof_025.phpt" role="test" />
+   <file name="tests/php/report_layer_test.php" role="test" />
    <file name="extension/config.m4" role="src" />
    <file name="extension/config.w32" role="src" />
    <file name="extension/php_xhprof.h" role="src" />
@@ -122,12 +134,6 @@
    <file name="xhprof_html/docs/sample-flamegraph.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-flat-view.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-parent-child-view.jpg" role="doc" />
-   <file name="xhprof_html/jquery/indicator.gif" role="php" />
-   <file name="xhprof_html/jquery/jquery-1.2.6.js" role="php" />
-   <file name="xhprof_html/jquery/jquery.autocomplete.css" role="php" />
-   <file name="xhprof_html/jquery/jquery.autocomplete.js" role="php" />
-   <file name="xhprof_html/jquery/jquery.tooltip.css" role="php" />
-   <file name="xhprof_html/jquery/jquery.tooltip.js" role="php" />
    <file name="xhprof_html/js/xhprof_report.js" role="php" />
    <file name="xhprof_html/js/flamegraph.js" role="php" />
    <file name="xhprof_html/flamegraph.php" role="php" />
@@ -164,6 +170,25 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-04</date>
+      <version>
+       <release>2.3.14</release>
+       <api>2.3.14</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - Sampling runs fully supported (exact flame graph, folded export);
+         PHP 8.5 deprecation and robustness guards; bin/xhprof-diff
+         --relative mode; jQuery stack replaced with native JavaScript;
+         dark mode; gcov and valgrind CI jobs; release workflow with
+         tarball attachment; report-layer test suite (140 checks).
+      </notes>
+   </release>
+
    <release>
       <date>2026-10-04</date>
       <version>

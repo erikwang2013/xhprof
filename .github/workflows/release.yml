@@ -1,0 +1,91 @@
+# 发布自动化：push tag vX.Y.Z 时校验版本、构建 PEAR tarball 并创建 GitHub Release。
+#
+# 待首次 tag 触发验证（v2.3.14）：本地无法干跑（gh workflow run 需要 workflow_dispatch
+# 且要先推送），已通过 actionlint + python yaml 解析 + 逐行审读。
+# 前提：setup-php 安装的 PHP 自带 pear（scripts/release.sh 依赖 pear 命令）；
+# GITHUB_TOKEN 需要 contents: write 才能创建 release（见下方 permissions）。
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build tarball and publish GitHub release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Check tag against package.xml
+        run: |
+          python3 - <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
+          root = ET.parse('package.xml').getroot()
+          for el in root.iter():
+              el.tag = el.tag.split('}', 1)[-1]  # package.xml declares a default DTD namespace
+          version = (root.findtext('version/release') or '').strip()
+          tag = os.environ['GITHUB_REF_NAME']
+          if tag != 'v' + version:
+              sys.exit(f'error: tag {tag!r} does not match package.xml <release> {version!r} - expected tag v{version}')
+          print(f'ok: tag {tag} matches package.xml <release> {version}')
+          PY
+
+      - name: Build tarball (scripts/release.sh)
+        run: bash scripts/release.sh
+
+      - name: Build release notes from package.xml <notes>
+        run: |
+          python3 - <<'PY'
+          import glob, hashlib, sys, xml.etree.ElementTree as ET
+          root = ET.parse('package.xml').getroot()
+          for el in root.iter():
+              el.tag = el.tag.split('}', 1)[-1]  # package.xml declares a default DTD namespace
+          version = (root.findtext('version/release') or '').strip()
+          tarballs = sorted(glob.glob(f'xhprof-{version}.tgz'))
+          if len(tarballs) != 1:
+              sys.exit(f'error: expected exactly one xhprof-{version}.tgz, got {tarballs}')
+          notes = (root.findtext('notes') or '').strip()
+          if not notes:
+              sys.exit('error: package.xml top-level <notes> is empty')
+          sha = hashlib.sha256(open(tarballs[0], 'rb').read()).hexdigest()
+          with open('release-notes.md', 'w') as fh:
+              fh.write(notes + f'\n\n---\n\nTarball: `{tarballs[0]}`\nSHA-256: `{sha}`\n')
+          print(f'ok: release-notes.md written from package.xml <notes>, sha256 {sha}')
+          PY
+
+      - name: Create or update GitHub release
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          TARBALL="xhprof-${TAG#v}.tgz"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists - re-uploading $TARBALL and updating notes"
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$TARBALL"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
+              --notes-file release-notes.md "$TARBALL"
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "## Release $GITHUB_REF_NAME"
+            echo ""
+            echo "- Tarball: \`xhprof-${GITHUB_REF_NAME#v}.tgz\` (SHA-256 is in the release notes)"
+            echo "- Release page: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
+            echo ""
+            echo "**PECL upload is a manual step** (if wanted): https://pecl.php.net/package/xhprof -> Upload Release."
+          } >> "$GITHUB_STEP_SUMMARY"

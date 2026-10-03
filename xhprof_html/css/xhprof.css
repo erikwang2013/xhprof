@@ -97,3 +97,179 @@ ul.xhprof_actions li a:hover {
   background:#3B5998 none repeat scroll 0 0;
   color:#FFFFFF;
 }
+
+/* hover tip on the metric cells of the parent/child report */
+#tooltip {
+  position: absolute;
+  z-index: 3000;
+  border: 1px solid #111;
+  background-color: lightyellow;
+  padding: 5px;
+  opacity: 0.9;
+}
+
+#tooltip div { margin: 0; }
+
+/* function-name typeahead drop-down */
+.ac_results {
+  position: absolute;
+  padding: 0;
+  border: 1px solid black;
+  background-color: white;
+  overflow: hidden;
+  z-index: 99999;
+}
+
+.ac_results ul {
+  width: 100%;
+  max-height: 180px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ac_results li {
+  margin: 0;
+  padding: 2px 5px;
+  cursor: default;
+  display: block;
+  font: menu;
+  font-size: 12px;
+  line-height: 16px;
+  overflow: hidden;
+}
+
+.ac_results li.ac_odd {
+  background-color: #eee;
+}
+
+.ac_results li.ac_over {
+  background-color: #0A246A;
+  color: white;
+}
+
+/*
+ * Dark theme.
+ *
+ * The report pages are built from presentational attributes (bgcolor,
+ * bordercolor, inline style) all over xhprof_lib/display/xhprof.php; those
+ * can't be re-tinted per theme in PHP, but attribute selectors reach them,
+ * so the light colors are remapped here instead of touching the markup.
+ * The inline styles need !important: only an author-important rule can
+ * outrank them.
+ */
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #1b1b1b;
+    color: #ddd;
+  }
+
+  a {
+    color: #8ab4f8;
+  }
+
+  /* odd (striped) table rows: tr bgcolor="#e5e5e5" */
+  tr[bgcolor="#e5e5e5"] {
+    background: #262626;
+  }
+
+  /* table header rows: tr bgcolor="#bdc7d8" */
+  tr[bgcolor="#bdc7d8"] {
+    background: #2f3b4d;
+  }
+
+  /* "Parent function"/"Child function" section rows: tr bgcolor="#e0e0ff" */
+  tr[bgcolor="#e0e0ff"] {
+    background: #2a2f45;
+  }
+
+  /* exclusive-metrics row of the focused function: tr bgcolor="#ffffff" */
+  tr[bgcolor="#ffffff"] {
+    background: transparent;
+  }
+
+  /* overall summary table: table bgcolor="#bdc7d8" */
+  table[bgcolor="#bdc7d8"] {
+    background: #2a2a2a;
+  }
+
+  /* report tables: bordercolor="#bdc7d8" on tables and the vbar splits */
+  table[bordercolor="#bdc7d8"] {
+    border-color: #555;
+  }
+  td.vbar, th.vbar, td.vbbar, th.vbar, td.vrbar, td.vgbar {
+    border-left-color: #555;
+  }
+  td.vwbar, th.vwbar, td.vwlbar, th.vwlbar {
+    border-left-color: #555;
+  }
+
+  /* sorted column: td.sorted */
+  td.sorted {
+    color: #8ab4f8;
+  }
+
+  /* share-of-total column (blue in light) and the diff columns: pure and
+     dark red/green/blue are unreadable on a dark background. */
+  td.vbbar {
+    color: #8ab4f8;
+  }
+  td.vrbar {
+    color: #ff7b72;
+  }
+  td.vgbar {
+    color: #7ee787;
+  }
+
+  /* inline <i style='color:red'>Regressions</i> / green improvements and
+     the blue "Exclusive Metrics" label: only !important outranks inline. */
+  i[style*="color:red"] {
+    color: #ff7b72 !important;
+  }
+  i[style*="color:green"] {
+    color: #7ee787 !important;
+  }
+  td[style*="color:blue"] {
+    color: #8ab4f8 !important;
+  }
+
+  .bubble {
+    background: #2f3b4d;
+  }
+
+  /* share-of-parent bars */
+  .pctbar {
+    background: #3a3a3a;
+    border-color: #555;
+  }
+
+  /* the focused function's row */
+  tr.current_function {
+    background: #3a3320;
+  }
+
+  ul.xhprof_actions li {
+    border-bottom-color: #444;
+  }
+
+  /* the light tooltip is unreadable on a dark page */
+  #tooltip {
+    background: #333;
+    border-color: #888;
+    color: #eee;
+  }
+
+  .ac_results {
+    border-color: #888;
+    background-color: #2a2a2a;
+    color: #eee;
+  }
+  .ac_results li.ac_odd {
+    background-color: #262626;
+  }
+  .ac_results li.ac_over {
+    background-color: #3B5998;
+    color: #fff;
+  }
+}

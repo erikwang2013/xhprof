@@ -18,9 +18,10 @@
  * This file contains callgrind (Valgrind profile exchange format) export
  * related XHProf utility functions.
  *
- * Events map XHProf's metrics as Time=wt, Cpu=cpu, MemUse=mu. Each function's
- * self cost is its exclusive metrics, each cfn=/calls= pair the callee's
- * inclusive metrics for that parent==>child edge.
+ * Events map XHProf's metrics as Time=wt, Cpu=cpu, MemUse=mu (Samples for
+ * sampled runs); only the metrics a run actually carries become columns.
+ * Each function's self cost is its exclusive metrics, each cfn=/calls= pair
+ * the callee's inclusive metrics for that parent==>child edge.
  *
  * Approximate by construction: XHProf stores no source positions (the cost
  * position is always line 0) and no per-callsite split, so all calls from a
@@ -81,6 +82,26 @@ function xhprof_callgrind_report($raw_data, $run_desc = '') {
   $totals = array();
   $symbol_tab = xhprof_compute_flat_info($raw_data, $totals);
 
+  // one event column per metric the run actually carries: a wall time only
+  // run must not grow constant-zero Cpu / MemUse columns. The event names
+  // times keep the mapping documented above; "samples" (sampling profiler
+  // runs) is passed through under its own name.
+  $event_names = array('wt' => 'Time', 'cpu' => 'Cpu', 'mu' => 'MemUse',
+                       'samples' => 'Samples');
+  $keys = array();
+  $names = array();
+  foreach (xhprof_get_metrics($raw_data) as $metric) {
+    if (isset($event_names[$metric])) {
+      $keys[] = $metric;
+      $names[] = $event_names[$metric];
+    }
+  }
+  if (empty($keys)) {
+    // degenerate (e.g. empty) run: keep a well formed header.
+    $keys = array('wt', 'cpu', 'mu');
+    $names = array('Time', 'Cpu', 'MemUse');
+  }
+
   // group outgoing edges per caller: callgrind wants the calls listed
   // inside their caller's fn= block.
   $calls = array();
@@ -102,16 +123,16 @@ function xhprof_callgrind_report($raw_data, $run_desc = '') {
   $out .= "pid: 0\n";
   $out .= "cmd: " . xhprof_callgrind_name(
             ($run_desc !== '') ? $run_desc : 'xhprof run') . "\n";
-  $out .= "events: Time Cpu MemUse\n";
+  $out .= "events: " . implode(' ', $names) . "\n";
   $out .= "\n";
 
   foreach ($symbol_tab as $symbol => $info) {
     $out .= "fn=" . xhprof_callgrind_name($symbol) . "\n";
-    $out .= xhprof_callgrind_cost_line(array(
-                'wt' => isset($info['excl_wt']) ? $info['excl_wt'] : 0,
-                'cpu' => isset($info['excl_cpu']) ? $info['excl_cpu'] : 0,
-                'mu' => isset($info['excl_mu']) ? $info['excl_mu'] : 0,
-              ));
+    $self = array();
+    foreach ($keys as $key) {
+      $self[$key] = isset($info['excl_' . $key]) ? $info['excl_' . $key] : 0;
+    }
+    $out .= xhprof_callgrind_cost_line($self, $keys);
 
     if (!empty($calls[$symbol])) {
       foreach ($calls[$symbol] as $call) {
@@ -121,7 +142,7 @@ function xhprof_callgrind_report($raw_data, $run_desc = '') {
         $ct = isset($call_info['ct']) ? (int)round($call_info['ct']) : 1;
         $out .= "cfn=" . xhprof_callgrind_name($call['child']) . "\n";
         $out .= "calls=" . max(1, $ct) . " 0\n";
-        $out .= xhprof_callgrind_cost_line($call_info);
+        $out .= xhprof_callgrind_cost_line($call_info, $keys);
       }
     }
     $out .= "\n";

@@ -4,10 +4,16 @@ on:
   push:
     branches: [ master ]
   pull_request:
+  schedule:
+    # 每周一 04:17 UTC：只跑 valgrind 内存检查（linux/windows/coverage 用 if 排除 schedule）。
+    # 避开整点，减少 runner 排队抖动。
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
 
 jobs:
   linux:
     name: PHP ${{ matrix.php }}
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -38,6 +44,16 @@ jobs:
           ./configure
           make -j"$(nproc)"
 
+      - name: Report layer tests
+        # tests/php/report_layer_test.php 与 lib 层改动一起落地；文件存在才跑，
+        # 避免与另一个分支的落地顺序耦合。扩展未加载时该测试只覆盖纯 PHP 报表层。
+        run: |
+          if [ -f tests/php/report_layer_test.php ]; then
+            php tests/php/report_layer_test.php
+          else
+            echo "tests/php/report_layer_test.php not present - skipping"
+          fi
+
       - name: Test
         working-directory: extension
         env:
@@ -47,13 +63,16 @@ jobs:
 
   # 待首次运行验证：Windows 构建使用 php-sdk + devel pack（与 .appveyor.yml 相同流程），
   # 因为 setup-php 在 Windows 上只安装预编译 PHP、不提供 phpize/编译工具链。
-  # 首次运行通过后可移除 continue-on-error（功能测试仍由 AppVeyor 覆盖）。
+  # 该 job 已在 GitHub Actions 上实测全绿，故不再 continue-on-error（功能测试仍由 AppVeyor 覆盖）。
+  # 风险是镜像轮换：php-sdk 启动脚本依赖 wmic（windows-latest 已移除，故钉在 windows-2022），
+  # 且 downloads.php.net 的 devel pack 是历史归档；若上游变动导致该 job 开始红，
+  # 临时加回 continue-on-error: true 并开 issue 跟进。
   windows:
     name: Windows (PHP 8.4 NTS)
+    if: github.event_name != 'schedule'
     # php-sdk 的启动脚本依赖 wmic，而 windows-latest（Server 2025）已移除它；
     # windows-2022 仍自带 wmic，故钉在此镜像。
     runs-on: windows-2022
-    continue-on-error: true
     env:
       SDK_VER: '2.3.0'
       PHP_VER: '8.4.26'
@@ -85,3 +104,99 @@ jobs:
           & "$pwd\php-sdk-binary-tools-php-sdk-$env:SDK_VER\phpsdk-vs17-x64.bat" -t "$pwd\task.bat"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem extension -Recurse -Filter php_xhprof.dll | Select-Object FullName
+
+  # gcov 行覆盖率（PHP 8.5）。CFLAGS 配方已本地全量实测：25/25 测试通过，
+  # 扩展对象落在 .libs/（libtool），所以 gcov 必须带 -o .libs。
+  # 先以非阻塞方式收数据，稳定几轮后再考虑收紧 continue-on-error。
+  coverage:
+    name: Coverage (PHP 8.5, gcov)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Build with gcov flags
+        working-directory: extension
+        run: |
+          phpize
+          CFLAGS="-fprofile-arcs -ftest-coverage --coverage -O0" ./configure
+          make -j"$(nproc)"
+
+      - name: Test
+        working-directory: extension
+        env:
+          TEST_PHP_ARGS: "-q"
+          REPORT_EXIT_STATUS: "1"
+        run: make test
+
+      - name: Report line coverage
+        working-directory: extension
+        run: |
+          gcov -b -o .libs xhprof.c > gcov-report.txt 2>&1 || true
+          metrics=$(grep -A4 -m1 "^File .*xhprof\.c'" gcov-report.txt | tail -n +2)
+          echo "${metrics:-gcov produced no summary}"
+          {
+            echo '## gcov line coverage (extension/xhprof.c)'
+            echo ''
+            echo '```'
+            echo "${metrics:-gcov produced no summary - see the gcov-report artifact}"
+            echo '```'
+            echo ''
+            echo 'Full per-line report: artifact `gcov-report` (`xhprof.c.gcov`).'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload gcov report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcov-report
+          path: |
+            extension/gcov-report.txt
+            extension/*.gcov
+          if-no-files-found: warn
+
+  # valgrind memcheck：每周 schedule + 手动 dispatch 触发，非阻塞、60 分钟超时。
+  # 本机未实测（开发机没有 valgrind），首次 dispatch 后按日志收紧。
+  valgrind:
+    name: Valgrind memcheck (weekly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          valgrind --version
+
+      - name: Build
+        working-directory: extension
+        run: |
+          phpize
+          ./configure
+          make -j"$(nproc)"
+
+      - name: Test under valgrind
+        working-directory: extension
+        env:
+          TEST_PHP_ARGS: "-m"
+          REPORT_EXIT_STATUS: "1"
+        run: make test

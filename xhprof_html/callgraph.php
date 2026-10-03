@@ -68,8 +68,15 @@ $params = array(// run id param
 // pull values of these params, and create named globals for each param
 xhprof_param_init($params);
 
-// if invalid value specified for threshold, then use the default
-if ($threshold < 0 || $threshold > 1) {
+// if invalid value specified for threshold, then use the default. The
+// upstream float cast quietly turns "abc" (or "") into 0.0, which means
+// "fold nothing at all" -- not what the caller asked for -- so a value that
+// is not a number falls back to the default as well. "0" is a number: it
+// still means "fold nothing".
+$threshold_raw = isset($_GET['threshold']) ? $_GET['threshold']
+               : (isset($_POST['threshold']) ? $_POST['threshold'] : null);
+if (!is_string($threshold_raw) || !is_numeric(trim($threshold_raw))
+    || $threshold < 0 || $threshold > 1) {
   $threshold = $params['threshold'][1];
 }
 

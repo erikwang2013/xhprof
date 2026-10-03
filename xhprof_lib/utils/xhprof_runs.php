@@ -174,6 +174,10 @@ class XHProfRuns_Default implements iXHProfRuns {
       return null;
     }
 
+    // sampling profiler runs arrive as "timestamp => stack" entries; fold
+    // them into the parent/child shape the reports expect.
+    $raw_data = xhprof_expand_sampled_run($raw_data);
+
     // metric values are used in arithmetic all over the report code:
     // degrade anything that is not a number instead of blowing up later.
     $raw_data = xhprof_sanitize_run_data($raw_data);
@@ -181,6 +185,29 @@ class XHProfRuns_Default implements iXHProfRuns {
     $run_desc = "XHProf Run (Namespace=$type)";
     $cached_runs[$file_name] = array('desc' => $run_desc, 'data' => $raw_data);
     return $raw_data;
+  }
+
+  /**
+   * Return a run exactly as it was saved: no sample folding, no
+   * sanitizing. get_run() already converts both, which makes it impossible
+   * to tell a sampled run from an instrumented one afterwards; tools that
+   * need the original shape can read it here.
+   *
+   * Returns the raw array, or null when the run cannot be read.
+   */
+  public function read_run_raw($run_id, $type = "xhprof") {
+    $file_name = $this->file_name($run_id, $type);
+    if ($file_name === null || !file_exists($file_name)) {
+      return null;
+    }
+
+    $contents = file_get_contents($file_name);
+    if ($contents === false) {
+      return null;
+    }
+
+    $raw_data = @unserialize($contents, array('allowed_classes' => false));
+    return is_array($raw_data) ? $raw_data : null;
   }
 
   public function save_run($xhprof_data, $type, $run_id = null) {
@@ -222,13 +249,30 @@ class XHProfRuns_Default implements iXHProfRuns {
         echo '<div style="margin: 4px 0px;">'
             . '<button type="button" class="xhprof_compare_button" '
             . 'onclick="xhprofCompareSelectedRuns()">Compare selected</button> '
+            . '<button type="button" class="xhprof_aggregate_button" '
+            . 'onclick="xhprofAggregateSelectedRuns()">Aggregate selected</button> '
             . '<small>check exactly two runs; the one higher in the list '
             . '(the newer run) becomes run1</small></div>' . "\n";
         echo "<ul>\n";
         $files = glob("{$this->dir}/*.{$this->suffix}");
 		usort($files, function($a, $b) {return filemtime($b) - filemtime($a);});
         foreach ($files as $file) {
-            list($run,$source) = explode('.', basename($file));
+            // file names are "<run id>.<type>.<suffix>". Run ids may contain
+            // dots themselves ("my.run.1"), so strip the fixed suffix and
+            // split the type off at the last remaining dot.
+            $base = basename($file);
+            $base = preg_replace('/\.' . preg_quote($this->suffix, '/') . '$/',
+                                 '', $base);
+            $dot = strrpos($base, '.');
+            if ($dot === false) {
+                // no type part: like the old explode() would, fall back to
+                // the suffix as the source.
+                $run = $base;
+                $source = $this->suffix;
+            } else {
+                $run = substr($base, 0, $dot);
+                $source = substr($base, $dot + 1);
+            }
             echo '<li><input type="checkbox" class="xhprof_run_select" value="'
                 . htmlentities($run) . '" data-source="'
                 . htmlentities($source) . '"> <a href="' . $script_url
@@ -253,6 +297,26 @@ class XHProfRuns_Default implements iXHProfRuns {
             . "  location.href = " . json_encode($script_name)
             . " + '?run1=' + encodeURIComponent(picked[0].value)\n"
             . "    + '&run2=' + encodeURIComponent(picked[1].value)\n"
+            . "    + '&source=' + encodeURIComponent("
+            . "picked[0].getAttribute('data-source'));\n"
+            . "}\n"
+            . "function xhprofAggregateSelectedRuns() {\n"
+            . "  var boxes = document.getElementsByClassName ? "
+            . "document.getElementsByClassName('xhprof_run_select') : [];\n"
+            . "  var picked = [];\n"
+            . "  for (var i = 0; i < boxes.length; i++) {\n"
+            . "    if (boxes[i].checked) { picked.push(boxes[i]); }\n"
+            . "  }\n"
+            . "  if (picked.length < 2) {\n"
+            . "    alert('Check two or more runs to aggregate them.');\n"
+            . "    return;\n"
+            . "  }\n"
+            . "  var runs = [];\n"
+            . "  for (var i = 0; i < picked.length; i++) {\n"
+            . "    runs.push(encodeURIComponent(picked[i].value));\n"
+            . "  }\n"
+            . "  location.href = " . json_encode($script_name)
+            . " + '?run=' + runs.join(',')\n"
             . "    + '&source=' + encodeURIComponent("
             . "picked[0].getAttribute('data-source'));\n"
             . "}\n"
