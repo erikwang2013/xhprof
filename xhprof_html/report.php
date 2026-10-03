@@ -25,6 +25,12 @@
  * JSON carries the flat per-function metrics plus the run totals, CSV has
  * one row per function (last row: the totals) and callgrind emits the
  * caller/callee edges in Valgrind's profile exchange format.
+ *
+ * CSV columns: fn, [ct,] then <metric>, excl_<metric> for every metric the
+ * run carries; the TOTAL row leaves the exclusive columns empty (there is no
+ * per-run exclusive total). csv and callgrind are sent as downloads
+ * (Content-Disposition); an unknown format falls back to json. When the run
+ * cannot be loaded the response is 404 text/plain.
  */
 
 // by default assume that xhprof_html & xhprof_lib directories

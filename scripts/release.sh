@@ -7,6 +7,9 @@
 #
 # Stops before anything irreversible: tagging, pushing and the PECL upload are
 # printed as a checklist and left to a human.
+#
+# Requires: pear (aborts without it), tar, and sha256sum or shasum. Writes the
+# tarball into the repository root; --clean removes it again on success.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

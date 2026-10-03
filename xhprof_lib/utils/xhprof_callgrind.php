@@ -18,6 +18,15 @@
  * This file contains callgrind (Valgrind profile exchange format) export
  * related XHProf utility functions.
  *
+ * Events map XHProf's metrics as Time=wt, Cpu=cpu, MemUse=mu. Each function's
+ * self cost is its exclusive metrics, each cfn=/calls= pair the callee's
+ * inclusive metrics for that parent==>child edge.
+ *
+ * Approximate by construction: XHProf stores no source positions (the cost
+ * position is always line 0) and no per-callsite split, so all calls from a
+ * caller to a callee are lumped into one entry, and costs are emitted as
+ * rounded integers.
+ *
  * See http://valgrind.org/docs/manual/cl-format.html for the format.
  */
 

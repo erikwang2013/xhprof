@@ -31,14 +31,21 @@ include_once $XHPROF_ROOT . "/xhprof_lib/utils/xhprof_lib.php";
 include_once $XHPROF_ROOT . "/xhprof_lib/utils/xhprof_runs.php";
 
 // save raw data for this profiler run using default
-// implementation of iXHProfRuns.
+// implementation of iXHProfRuns. XHProfRuns_Default writes the run file into
+// the xhprof.output_dir ini setting (set it in php.ini; see the README).
 $xhprof_runs = new XHProfRuns_Default();
 
 // save the run under a namespace "xhprof_foo"
 $run_id = $xhprof_runs->save_run($xhprof_data, "xhprof_foo");
 
+// Point a browser at the UI to view the run. Quickest route is the Docker
+// quick start in the README (`docker compose up`, then open
+// http://localhost:8080): the container seeds this script and serves the UI.
+// Running from a source checkout instead, serve the xhprof_html/ directory
+// with any PHP web server and open index.php?run=<id>&source=<source>.
 echo "---------------\n".
-     "Assuming you have set up the http based UI for \n".
-     "XHProf at some address, you can view run at \n".
-     "http://<xhprof-ui-address>/index.php?run=$run_id&source=xhprof_foo\n".
+     "Saved run $run_id under source \"xhprof_foo\".\n".
+     "View it in the XHProf UI (index.php?run=$run_id&source=xhprof_foo)\n".
+     "-- Docker quick start: docker compose up, then http://localhost:8080\n".
+     "-- source checkout: serve xhprof_html/ and set xhprof.output_dir\n".
      "---------------\n";

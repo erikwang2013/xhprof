@@ -23,20 +23,31 @@
  * (xhprof_sort_flat_data) as the web report, so the numbers match what
  * xhprof_html/index.php shows.
  *
- * usage: xhprof-report [options] <run id | run file>
+ * usage: xhprof-report [options] <run id>
+ * (a run file is read with -f/--file, positional arguments are run ids)
+ *
+ * exit status: 0 = report printed (or --help)
+ *              2 = usage or run loading error
  */
 
 require_once dirname(dirname(__FILE__)) . '/xhprof_lib/display/xhprof.php';
 
-$usage = "usage: xhprof-report [options] <run id | run file>\n"
+$usage = "usage: xhprof-report [options] <run id>\n"
   . "\n"
-  . "  -f, --file PATH    read the run from PATH instead of a run id\n"
+  . "  -f, --file PATH    read the run from PATH (a saved run file)\n"
+  . "                     instead of a run id\n"
   . "      --source NAME  run namespace (default: xhprof)\n"
-  . "      --sort COL     wt (default) | cpu | mu | pmu | ct | fn\n"
+  . "      --sort COL     wt (default) | cpu | mu | pmu | ut | st | ct | fn\n"
+  . "                     (excl_* variants of the metrics also work;\n"
+  . "                     samples for runs from the sampling profiler)\n"
   . "      --limit N      print only the top N functions (default: 0 = all)\n"
   . "  -h, --help\n"
   . "\n"
-  . "A run id is read from the XHPROF_OUTPUT_DIR directory.\n";
+  . "Run ids are looked up in xhprof.output_dir (the XHPROF_OUTPUT_DIR\n"
+  . "environment variable also works).\n"
+  . "\n"
+  . "exit status: 0 = report printed (or --help)\n"
+  . "             2 = usage or run loading error\n";
 
 $options = getopt('f:h', array('file:', 'source:', 'sort:', 'limit:', 'help'),
                   $rest_index);

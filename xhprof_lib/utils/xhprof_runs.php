@@ -222,8 +222,8 @@ class XHProfRuns_Default implements iXHProfRuns {
         echo '<div style="margin: 4px 0px;">'
             . '<button type="button" class="xhprof_compare_button" '
             . 'onclick="xhprofCompareSelectedRuns()">Compare selected</button> '
-            . '<small>check two runs above the list first; the first one '
-            . 'checked is the baseline (run1)</small></div>' . "\n";
+            . '<small>check exactly two runs; the one higher in the list '
+            . '(the newer run) becomes run1</small></div>' . "\n";
         echo "<ul>\n";
         $files = glob("{$this->dir}/*.{$this->suffix}");
 		usort($files, function($a, $b) {return filemtime($b) - filemtime($a);});

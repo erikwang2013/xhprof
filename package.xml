@@ -41,10 +41,10 @@
   <active>yes</active>
  </lead>
  <date>2026-10-04</date>
- <time>00:30:00</time>
+ <time>01:45:00</time>
  <version>
-  <release>2.3.12</release>
-  <api>2.3.12</api>
+  <release>2.3.13</release>
+  <api>2.3.13</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,19 +52,14 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - New xhprof.profiler INI setting: set to 0 to skip observer registration
-      entirely and remove the idle per-call overhead; xhprof_enable() and
-      xhprof_sample_enable() then fail with a warning.
-    - Long symbols no longer truncate into a single merged entry; sampling
-      mode uses a per-request heap buffer instead of a 512KB stack buffer.
-    - New xhprof.auto_enable / xhprof.auto_enable_flags INI settings; typed
-      arginfo for all exported functions; phpinfo() reports runtime state.
-    - Reports: 20-100x faster sorting (top-N only), approximate flame graph
-      view, callgrind and JSON/CSV export, compare-runs entry in the run
-      list, percentage bars in the parent/child view, bounded typeahead.
-    - New CLI tools: bin/xhprof-report and bin/xhprof-diff (CI regression
-      gate); Docker quick start; XHGui recipe; ZTS static TSRMLS cache.
-    - Phabricator-era support/ tooling and .arcconfig/.arclint removed.
+    - Documentation release on top of 2.3.12 (no functional changes).
+    - User guide rewritten (xhprof_html/docs/index.html): run list, flat /
+      parent-child / DIFF / aggregate reports, callgraph, approximate flame
+      graph, exports, typeahead, CLI tools and an FAQ; fresh screenshots.
+    - README (EN + zh-CN): rewritten intro, architecture / design /
+      features / lifecycle diagrams, project structure map.
+    - Fixed: the compare-selected description now matches the actual
+      behavior (the newer run in the list is the baseline).
  </notes>
  <contents>
   <dir name="/">
@@ -78,6 +73,10 @@
    <file name="resource/xhpy-wink.svg" role="doc" />
    <file name="resource/xhpy-surprised.svg" role="doc" />
    <file name="resource/xhpy-blink.svg" role="doc" />
+   <file name="resource/xhprof-architecture.svg" role="doc" />
+   <file name="resource/xhprof-design.svg" role="doc" />
+   <file name="resource/xhprof-features.svg" role="doc" />
+   <file name="resource/xhprof-lifecycle.svg" role="doc" />
    <file name="travis/run-test.sh" role="test" />
    <file name="extension/tests/common.php" role="test" />
    <file name="extension/tests/xhprof_001.phpt" role="test" />
@@ -120,6 +119,7 @@
    <file name="xhprof_html/docs/sample-callgraph-image.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-diff-report-flat-view.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-diff-report-parent-child-view.jpg" role="doc" />
+   <file name="xhprof_html/docs/sample-flamegraph.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-flat-view.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-parent-child-view.jpg" role="doc" />
    <file name="xhprof_html/jquery/indicator.gif" role="php" />
@@ -164,6 +164,23 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-04</date>
+      <version>
+       <release>2.3.13</release>
+       <api>2.3.13</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - Documentation release: rewritten user guide, README overhaul with
+         architecture/design/features/lifecycle diagrams and a project
+         structure map, fresh screenshots; compare-selected docs corrected.
+      </notes>
+   </release>
+
    <release>
       <date>2026-10-04</date>
       <version>

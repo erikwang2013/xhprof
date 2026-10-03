@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="1000" height="500" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">xhprof 项目设计 — 模块依赖</title>
+  <desc id="desc">模块依赖图：extension 采集数据，经数据契约流入 xhprof_lib 读写与计算，再由 display 渲染、xhprof_html 作为入口；bin 与 scripts 复用 lib，tests 旁挂扩展，package.xml 与 docker 作为分发面。</desc>
+  <style>
+    text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue','Noto Sans SC','Source Han Sans CN','PingFang SC','Microsoft YaHei',sans-serif}
+    .mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,'DejaVu Sans Mono',monospace}
+    .h1{font-size:21px;font-weight:700;fill:#1c2b4a}
+    .sub{font-size:12px;fill:#4c6cb5}
+    .tt{font-size:12.5px;font-weight:600;fill:#1c2b4a}
+    .tx{font-size:10.5px;fill:#4c6cb5}
+    .mn{font-size:9.5px;fill:#3b5998}
+    .ac{font-size:10px;fill:#b45309}
+    .dep{font-size:9px;fill:#4c6cb5}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#1c2b4a"/>
+    </marker>
+    <marker id="ad" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#4c6cb5"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="500" rx="16" fill="#ffffff" stroke="#c3d9ff"/>
+
+  <text class="h1" x="32" y="42">项目设计 · Design</text>
+  <text class="sub" x="32" y="64">模块依赖 —— 谁生产数据、谁消费数据（箭头 = 依赖 / 消费方向）</text>
+  <text class="dep" x="968" y="64" text-anchor="end">实线 = 依赖 · 消费 ｜ 虚线 = 旁挂（测试 / 分发）</text>
+
+  <!-- ===== 主链：extension → 契约 → utils → display → html ===== -->
+  <rect x="26" y="100" width="156" height="120" rx="8" fill="#eef3fb" stroke="#3b5998"/>
+  <text class="tt" x="40" y="122">extension/</text>
+  <text class="tx" x="40" y="138">数据采集（C 扩展）</text>
+  <text class="mn mono" x="40" y="156">xhprof.c</text>
+  <text class="mn mono" x="40" y="171">php_xhprof.h · trace.h</text>
+  <text class="tx" x="40" y="190">观察者钩子 + 五指标</text>
+  <text class="tx" x="40" y="206">门控 xhprof.profiler</text>
+
+  <path d="M182 160 H218" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text class="dep" x="201" y="152" text-anchor="middle">产生</text>
+
+  <rect x="224" y="100" width="156" height="120" rx="8" fill="#fff7f0" stroke="#ff8b3d"/>
+  <text class="tt" x="238" y="122">数据契约</text>
+  <text class="tx" x="238" y="138">扁平调用数组</text>
+  <text class="mn mono" x="238" y="156">"caller==&gt;callee"</text>
+  <text class="mn mono" x="238" y="171">递归后缀 @n</text>
+  <text class="mn mono" x="238" y="186">wt ct cpu mu pmu</text>
+  <text class="ac" x="238" y="204">无层次树 · 由报表重建</text>
+
+  <path d="M380 160 H416" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text class="dep" x="399" y="152" text-anchor="middle">读写</text>
+
+  <rect x="422" y="100" width="156" height="120" rx="8" fill="#eef3fb" stroke="#3b5998"/>
+  <text class="tt" x="436" y="122">xhprof_lib/utils</text>
+  <text class="tx" x="436" y="138">读写 + 计算</text>
+  <text class="mn mono" x="436" y="156">xhprof_runs.php</text>
+  <text class="mn mono" x="436" y="171">xhprof_lib.php</text>
+  <text class="mn mono" x="436" y="186">callgraph_utils.php</text>
+  <text class="mn mono" x="436" y="201">xhprof_callgrind.php</text>
+
+  <path d="M578 160 H614" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text class="dep" x="597" y="152" text-anchor="middle">供数</text>
+
+  <rect x="620" y="100" width="156" height="120" rx="8" fill="#eef3fb" stroke="#3b5998"/>
+  <text class="tt" x="634" y="122">xhprof_lib/display</text>
+  <text class="tx" x="634" y="138">渲染层</text>
+  <text class="mn mono" x="634" y="156">xhprof.php</text>
+  <text class="tx" x="634" y="174">flat / 父子 / diff 视图</text>
+  <text class="tx" x="634" y="190">调用图 · 火焰图数据</text>
+
+  <path d="M776 160 H812" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text class="dep" x="795" y="152" text-anchor="middle">调用</text>
+
+  <rect x="818" y="100" width="156" height="120" rx="8" fill="#eef3fb" stroke="#3b5998"/>
+  <text class="tt" x="832" y="122">xhprof_html/</text>
+  <text class="tx" x="832" y="138">入口页面（PHP）</text>
+  <text class="mn mono" x="832" y="156">index.php 列表</text>
+  <text class="mn mono" x="832" y="171">report.php 报表</text>
+  <text class="mn mono" x="832" y="186">callgraph.php</text>
+  <text class="mn mono" x="832" y="201">flamegraph.php</text>
+
+  <!-- ===== 旁挂行：tests 与 bin/scripts ===== -->
+  <rect x="26" y="250" width="156" height="96" rx="8" fill="#ffffff" stroke="#4c6cb5" stroke-dasharray="5 3"/>
+  <text class="tt" x="40" y="272">extension/tests</text>
+  <text class="tx" x="40" y="290">25 个 .phpt 用例</text>
+  <text class="tx" x="40" y="306">指标 / 门控 / 输出</text>
+  <path d="M104 248 V224" fill="none" stroke="#4c6cb5" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+
+  <rect x="422" y="250" width="420" height="96" rx="8" fill="#ffffff" stroke="#4c6cb5" stroke-dasharray="5 3"/>
+  <text class="tt" x="436" y="272">bin/ 与 scripts/（复用 xhprof_lib）</text>
+  <text class="mn mono" x="436" y="292">bin/xhprof-report · bin/xhprof-diff · bin/xhprofile</text>
+  <text class="mn mono" x="436" y="308">scripts/xhprofile.php（采样封装）</text>
+  <text class="tx" x="436" y="328">只读消费 lib：计算 / 导出 / 回归对比</text>
+  <path d="M500 248 V224" fill="none" stroke="#4c6cb5" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+  <path d="M698 248 V224" fill="none" stroke="#4c6cb5" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+
+  <!-- ===== 分发面 ===== -->
+  <rect x="26" y="376" width="948" height="76" rx="8" fill="#f4f7fd" stroke="#4c6cb5" stroke-dasharray="6 4"/>
+  <text class="tt" x="40" y="398">分发面 · Distribution</text>
+  <text class="tx" x="40" y="418">package.xml（PECL 打包：扩展 + lib + html 资源）｜docker/（Dockerfile + docker compose 一键演示）</text>
+  <text class="tx" x="40" y="436">README.md / README.zh-CN.md（中英双语）｜examples/（示例脚本）｜xhprof_html/docs（使用文档）</text>
+  <path d="M166 374 V348" fill="none" stroke="#4c6cb5" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+  <path d="M620 374 V348" fill="none" stroke="#4c6cb5" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+  <path d="M896 374 V224" fill="none" stroke="#4c6cb5" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+</svg>

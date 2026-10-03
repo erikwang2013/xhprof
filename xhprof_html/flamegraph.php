@@ -26,6 +26,17 @@
  * reason.
  *
  * The nested JSON tree is rendered by js/flamegraph.js.
+ *
+ * GET params:
+ *   run        run id (like the other report pages)
+ *   source     run namespace (default "xhprof")
+ *   metric     metric used for the frame widths (default "wt"; falls back
+ *              to the run's first available metric if the run lacks it)
+ *   threshold  frames narrower than this fraction of the root frame are
+ *              folded into "(others)" (default 0.01)
+ *
+ * Output: an HTML page with the tree inlined as JSON for js/flamegraph.js.
+ * Recursion is capped (depth 512, 20000 nodes) so a huge run still renders.
  */
 
 // by default assume that xhprof_html & xhprof_lib directories

@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="1000" height="620" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">xhprof 架构设计 — 四层结构</title>
+  <desc id="desc">xhprof 的四层架构：PHP 运行时层、C 扩展层 xhprof.so、数据契约与存储、报表层（PHP）。</desc>
+  <style>
+    text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue','Noto Sans SC','Source Han Sans CN','PingFang SC','Microsoft YaHei',sans-serif}
+    .mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,'DejaVu Sans Mono',monospace}
+    .h1{font-size:21px;font-weight:700;fill:#1c2b4a}
+    .sub{font-size:12px;fill:#4c6cb5}
+    .lbl{font-size:13px;font-weight:700;fill:#3b5998}
+    .tt{font-size:12.5px;font-weight:600;fill:#1c2b4a}
+    .tx{font-size:10.5px;fill:#4c6cb5}
+    .mn{font-size:10px;fill:#3b5998}
+    .ac{font-size:10.5px;fill:#b45309}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#1c2b4a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="620" rx="16" fill="#ffffff" stroke="#c3d9ff"/>
+
+  <text class="h1" x="32" y="42">架构设计 · Architecture</text>
+  <text class="sub" x="32" y="64">PHP 扩展 + 报表工具链 —— 自顶向下四层：运行时 → 扩展 → 数据契约 → 报表</text>
+
+  <!-- ============ ① PHP runtime ============ -->
+  <rect x="28" y="76" width="944" height="112" rx="10" fill="#f4f7fd" stroke="#d8dfea"/>
+  <text class="lbl" x="44" y="97">① PHP 运行时层 · PHP Runtime</text>
+  <rect x="44" y="106" width="150" height="70" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="58" y="126">用户代码</text>
+  <text class="tx" x="58" y="142">Userland PHP</text>
+  <text class="tx" x="58" y="156">任意框架 / 脚本</text>
+  <path d="M194 141 H216" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="218" y="106" width="180" height="70" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="232" y="126">Zend Engine</text>
+  <text class="mono mn" x="232" y="142" fill="#3b5998">zend_execute_ex</text>
+  <text class="mono mn" x="232" y="156">zend_execute_internal</text>
+  <path d="M398 141 H420" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="422" y="106" width="534" height="70" rx="8" fill="#fff7f0" stroke="#ff8b3d" stroke-dasharray="5 3"/>
+  <text class="tt" x="438" y="126">xhprof.so 挂载点 · Observer hooks</text>
+  <text class="mn" x="438" y="142">fcall begin / fcall end（调用与返回钩子）</text>
+  <text class="mn" x="438" y="156">zend_execute_internal · compile hooks（编译期调用记录）</text>
+  <text class="ac" x="438" y="170">xhprof.profiler=0 → 不注册上述任何钩子</text>
+
+  <path d="M500 188 V204" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <!-- ============ ② C extension ============ -->
+  <rect x="28" y="206" width="944" height="136" rx="10" fill="#f4f7fd" stroke="#d8dfea"/>
+  <text class="lbl" x="44" y="227">② C 扩展层 · xhprof.so</text>
+  <rect x="44" y="236" width="210" height="94" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="58" y="256">调用栈追踪</text>
+  <text class="tx" x="58" y="274">caller / callee 配对</text>
+  <text class="tx" x="58" y="290">递归同名函数 @n 后缀</text>
+  <rect x="278" y="236" width="210" height="94" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="292" y="256">指标采集 · Metrics</text>
+  <text class="mono mn" x="292" y="274">wt 墙钟 · ct 自身耗时</text>
+  <text class="mono mn" x="292" y="290">cpu 用户+系统 · mu / pmu 内存</text>
+  <rect x="512" y="236" width="210" height="94" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="526" y="256">采样模式 · Sampling</text>
+  <text class="mono mn" x="526" y="274">xhprof.sampling_interval</text>
+  <text class="mono mn" x="526" y="290">xhprof.sampling_depth</text>
+  <rect x="746" y="236" width="210" height="94" rx="8" fill="#fff7f0" stroke="#ff8b3d"/>
+  <text class="tt" x="760" y="256">profiler 门控 · Gating</text>
+  <text class="mono ac" x="760" y="274">xhprof.profiler=0 → 不注册</text>
+  <text class="tx" x="760" y="290">未启用时约等于零开销</text>
+
+  <path d="M500 342 V358" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <!-- ============ ③ data contract ============ -->
+  <rect x="28" y="360" width="944" height="112" rx="10" fill="#f4f7fd" stroke="#d8dfea"/>
+  <text class="lbl" x="44" y="381">③ 数据契约与存储 · Data Contract &amp; Storage</text>
+  <rect x="44" y="390" width="156" height="70" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="mono mn" x="58" y="410" font-size="11">xhprof_disable()</text>
+  <text class="tx" x="58" y="428">停止采集</text>
+  <text class="tx" x="58" y="444">返回原始数组</text>
+  <path d="M200 425 H224" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="226" y="390" width="250" height="70" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="240" y="410">调用数组契约</text>
+  <text class="mono mn" x="240" y="428">键 "caller==&gt;callee"</text>
+  <text class="mono mn" x="240" y="444">值 {wt, ct, cpu, mu, pmu}</text>
+  <path d="M476 425 H500" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="502" y="390" width="200" height="70" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="mono mn" x="516" y="410" font-size="11">save_run()</text>
+  <text class="tx" x="516" y="428">序列化 + 落盘</text>
+  <text class="tx" x="516" y="444">写入 output_dir</text>
+  <path d="M702 425 H726" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="728" y="390" width="228" height="70" rx="8" fill="#fff7f0" stroke="#ff8b3d" stroke-dasharray="5 3"/>
+  <text class="mono ac" x="742" y="410" font-size="11">output_dir/*.xhprof</text>
+  <text class="ac" x="742" y="428">裸 serialize：无版本头、无校验</text>
+  <text class="ac" x="742" y="444">字符串键格式随版本演进</text>
+
+  <path d="M500 472 V488" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <!-- ============ ④ reporting ============ -->
+  <rect x="28" y="490" width="944" height="120" rx="10" fill="#f4f7fd" stroke="#d8dfea"/>
+  <text class="lbl" x="44" y="511">④ 报表层 · Reporting (PHP)</text>
+  <rect x="44" y="522" width="200" height="76" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="58" y="542">xhprof_lib 计算</text>
+  <text class="tx" x="58" y="560">flat 平铺 · parent/child</text>
+  <text class="tx" x="58" y="576">diff 运行对比 · aggregate</text>
+  <path d="M244 560 H264" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="266" y="522" width="200" height="76" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="280" y="542">UI 渲染 · xhprof_html</text>
+  <text class="tx" x="280" y="560">flat / 父子视图</text>
+  <text class="tx" x="280" y="576">调用图 · 近似火焰图</text>
+  <path d="M466 560 H486" fill="none" stroke="#1c2b4a" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="488" y="522" width="200" height="76" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+  <text class="tt" x="502" y="542">导出 &amp; CLI</text>
+  <text class="tx" x="502" y="560">callgrind / JSON / CSV</text>
+  <text class="mono mn" x="502" y="576">xhprof-report · xhprof-diff</text>
+  <rect x="710" y="522" width="246" height="76" rx="8" fill="#ffffff" stroke="#4c6cb5" stroke-dasharray="5 3"/>
+  <text class="tt" x="724" y="542">旁挂 · Companion</text>
+  <text class="tx" x="724" y="560">Docker 快速开始（docker compose up）</text>
+  <text class="tx" x="724" y="576">XHGui 对接（外部配方）</text>
+</svg>

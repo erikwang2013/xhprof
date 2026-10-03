@@ -4,7 +4,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     image: xhprof-demo
+    # host:container -- the UI is at http://localhost:8080
     ports:
       - "8080:8080"
-    # Seed one example run (namespace `xhprof_foo`), then serve the UI.
+    # Seed one example run (namespace `xhprof_foo`; sample.php writes to the
+    # container's output_dir /tmp/xhprof), then serve the UI. Runs live inside
+    # the container: `docker compose down` discards them.
     command: sh -c "php examples/sample.php >/dev/null && php -S 0.0.0.0:8080 -t xhprof_html"

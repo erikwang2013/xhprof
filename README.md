@@ -4,14 +4,63 @@
 
 <img src="resource/xhpy-blink.svg" alt="Xhpy — the xhprof mascot" width="140" align="right">
 
-XHProf is a function-level hierarchical profiler for PHP and has a simple HTML based navigational interface. The raw data collection component is implemented in C (as a PHP extension). The reporting/UI layer is all in PHP. It is capable of reporting function-level inclusive and exclusive wall times, memory usage, CPU times and number of calls for each function. Additionally, it supports ability to compare two runs (hierarchical DIFF reports), or aggregate results from multiple runs.
+XHProf is a function-level hierarchical profiler for PHP. The raw data collection component is implemented in C (as a PHP extension); the reporting/UI layer is all in PHP. It reports function-level inclusive and exclusive wall times, memory usage, CPU times and the number of calls for each function, and can compare two runs (hierarchical DIFF reports) or aggregate results from multiple runs.
 
-This version supports PHP7 and PHP8
+Around that core this repository ships a complete toolchain: a web UI with a run list and one-click compare (flat, parent-child, DIFF and aggregate reports), a callgraph and an *approximate* flame graph view; callgrind, JSON and CSV exports; CLI tools (`bin/xhprofile`, `bin/xhprof-report`, and `bin/xhprof-diff` as a CI regression gate); a one-command Docker demo; and the `xhprof.profiler=0` gate that keeps the extension loaded at roughly the cost of not loading it. Supported on PHP 7.2 through 8.6.
 
 # Why xhprof
-- Published on PECL, with the reporting UI, hierarchical DIFF reports and aggregation tooling kept in-tree.
-- The original Facebook project and the Tideways `php-xhprof-extension` fork are archived and both point users here; the PHP manual links to this fork as well.
-- Runs entirely on your own machine — profiles are written to your `xhprof.output_dir` and never leave it — and it records exact call counts plus deterministic wall/CPU/memory numbers, with diff and aggregate reports that sampling profilers cannot produce.
+- **Nothing leaves your machine.** Profiles are written to your `xhprof.output_dir` and stay there — no service, no upload, no telemetry.
+- **Exact, not sampled.** Every call is counted and every wall/CPU/memory number is measured by the extension's hooks, which is what makes DIFF and aggregate reports meaningful.
+- **The maintained lineage.** Published on PECL: the original Facebook project and the Tideways `php-xhprof-extension` fork are both archived and point users here, and the PHP manual links to this fork as well.
+
+# Architecture
+
+<p align="center"><img src="resource/xhprof-architecture.svg" alt="XHProf architecture: PHP runtime, C extension, data contract and storage, reporting layer" width="900"></p>
+
+Four layers, top to bottom. Userland PHP runs on the Zend Engine, where `xhprof.so` attaches its observer hooks to function calls; the extension pairs callers with callees — recursive calls become `foo@n` — accumulates `wt`, `ct`, `cpu`, `mu` and `pmu`, and can sample instead of tracing every call. `xhprof_disable()` hands the flat `"caller==>callee"` array back to PHP, `save_run()` serializes it into `xhprof.output_dir`, and the reporting layer rebuilds the call hierarchy from it. Set `xhprof.profiler=0` and none of those hooks are registered at all.
+
+# Design
+
+<p align="center"><img src="resource/xhprof-design.svg" alt="XHProf module dependencies: extension produces data, xhprof_lib computes, xhprof_html renders, bin and scripts reuse the library" width="900"></p>
+
+Who produces the data and who consumes it. `extension/` (C) produces the flat call array; `xhprof_lib/` reads and computes on it — `utils/` for run I/O, callgraph data and callgrind export, `display/` for the renderer that builds the flat, parent-child and DIFF views; `xhprof_html/` is the web entry point, and `bin/` plus `scripts/` consume the same library from the command line. `extension/tests`, `package.xml` and `docker/` hang off the side as test and distribution surfaces.
+
+# Features
+
+<p align="center"><img src="resource/xhprof-features.svg" alt="XHProf feature matrix: profiling, sampling, metrics, compare, DIFF, aggregate, callgraph, flame graph, exports, CLI, Docker, XHGui" width="900"></p>
+
+One box per capability: exact hierarchical profiling and sampling, the five metrics, run list with one-click compare, hierarchical DIFF, aggregate, callgraph, the approximate flame graph, the three export formats, the CLI regression gate, the Docker demo and XHGui integration — plus the two properties that apply to all of them, PHP 7.2–8.6 support and the `xhprof.profiler` gate.
+
+# Lifecycle
+
+<p align="center"><img src="resource/xhprof-lifecycle.svg" alt="XHProf lifecycle: load, enable, collect, save, read back, compute, render and export" width="900"></p>
+
+One request, from load to report. The extension registers its observers at module init (unless `xhprof.profiler=0`); profiling starts through `xhprof.auto_enable` or an explicit `xhprof_enable()` with `XHPROF_FLAGS_*`, and while the request runs the hooks accumulate metrics per caller/callee pair. `xhprof_disable()` returns the raw array, `save_run()` writes it to `output_dir`, and the PHP side reads it back with `get_run()` to compute flat / parent-child / DIFF / aggregate results, render the UI, export, or run the CLI — comparing and aggregating runs simply flows back into that same computation layer.
+
+# Project structure
+
+```
+xhprof/
+├── extension/            # the PHP extension in C: xhprof.c, trace.h, php_xhprof.h
+│   └── tests/            # 25 .phpt tests (metrics, gating, output)
+├── xhprof_lib/
+│   ├── utils/            # run I/O and computation: xhprof_runs, xhprof_lib,
+│   │                     #   callgraph_utils, xhprof_callgrind
+│   └── display/          # the report renderer (xhprof.php)
+├── xhprof_html/          # the web UI: index.php, report.php, callgraph.php, flamegraph.php
+│   ├── css/ js/ jquery/  # styles, report + flamegraph scripts, bundled jQuery
+│   └── docs/             # user guide (index.html, index-fr.html) and screenshots
+├── bin/                  # CLI: xhprofile (profile a script), xhprof-report, xhprof-diff
+├── scripts/              # release script and the sampling wrapper (xhprofile.php)
+├── docker/               # Dockerfile; docker-compose.yml at the root is the demo
+├── examples/             # sample.php, the script the Docker demo profiles
+├── resource/             # mascot and the architecture / design / features / lifecycle diagrams
+├── .github/workflows/    # CI (PHP matrix); .appveyor.yml and travis/ are legacy
+├── package.xml           # PECL package description
+├── composer.json         # Composer metadata (PHP >= 7.2 + ext-xhprof; autoloads xhprof_lib, exposes the CLI)
+├── CHANGELOG · CREDITS · LICENSE
+└── README.md · README.zh-CN.md
+```
 
 # PHP Version
 - 7.2
@@ -32,6 +81,8 @@ No PHP toolchain required — one command builds the extension and serves the UI
 docker compose up
 ```
 Then open <http://localhost:8080>. The container seeds one example run (`examples/sample.php`) on startup and stores runs in `/tmp/xhprof`.
+
+The UI itself — run list and compare, flat / parent-child / diff reports, aggregate, callgraph, flame graph, exports — is documented in [xhprof_html/docs/index.html](xhprof_html/docs/index.html).
 
 ## Install via PECL
 ```sh
@@ -201,3 +252,5 @@ Two runs of identical code on a busy machine can still differ by tens of percent
 
 ## PECL Repository
 [![pecl](resource/pecl.png)](https://pecl.php.net/package/xhprof)
+
+Maintained by [erik.xyz](https://erik.xyz)

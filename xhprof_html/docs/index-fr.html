@@ -7,13 +7,61 @@
 Documentation XHProf (Brouillon)
 </title>
 <style>
-  body { max-width: 52rem; margin: 0 auto; padding: 1rem; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { max-width: 52rem; margin: 0 auto; padding: 1rem; font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Helvetica, Arial, sans-serif; line-height: 1.5; }
   code, pre { background: #f4f4f4; }
   pre { overflow-x: auto; padding: .5rem; }
+  .banner { background: #fff3cd; border: 1px solid #e0c060; padding: .5rem .75rem; margin-bottom: 1rem; }
 </style>
 </head>
 <body>
+
+<div class="banner">
+<b>Attention : traduction de l’ancienne documentation.</b> Cette page est la
+traduction du brouillon d’origine (2008) ; certaines parties ne décrivent plus
+l’interface actuelle. <b>La version anglaise
+(<a href="index.html">index.html</a>) fait foi</b> — consultez-la pour les
+rapports actuels. Les copies d’écran de cette page ont été refaites avec
+l’interface actuelle.
+</div>
+
 <h3>Documentation XHProf (Brouillon)</h3>
+
+<h4>Ce que fait l’interface actuelle (résumé)</h4>
+<ul>
+<li><b>Liste des runs</b> — <code>index.php</code> sans paramètre liste les runs
+enregistrés (du plus récent au plus ancien). Cochez deux runs puis
+<b>Compare selected</b> pour ouvrir le rapport de différence : <em>le run le
+plus haut dans la liste (le plus récent) sert de référence (run1) — l’ordre
+des cases cochées n’a pas d’importance</em> ; la source (namespace) utilisée
+est celle de ce même run. Le même rapport est accessible par
+l’URL <code>index.php?run1=&lt;id1&gt;&amp;run2=&lt;id2&gt;&amp;source=&lt;source&gt;</code>.</li>
+<li><b>Rapport tabulaire (« flat »)</b> — totaux du run, colonnes triables,
+100 premières fonctions par défaut et lien <b>[ display all ]</b> ; chaque
+métrique est accompagnée de son pourcentage du total.</li>
+<li><b>Vue parent/enfant</b> — la fonction courante est surlignée, chaque
+appelant/appelé porte une barre indiquant sa part (survolez les cellules pour le
+détail) ; <b>[View Callgraph]</b> ouvre le graphe centré sur la fonction.</li>
+<li><b>Rapport de différence (diff)</b> — rouge = régression, vert =
+amélioration, trié par valeur absolue de l’écart ; le détail par fonction
+inclut les valeurs par appel.</li>
+<li><b>Agrégation</b> — <code>run=id1,id2,id3</code>, avec pondération
+optionnelle <code>wts=20,30,50</code> (un poids par run).</li>
+<li><b>Callgraph</b> — image générée par Graphviz <code>dot</code> (chemin
+critique mis en évidence).</li>
+<li><b>Graphe de flammes — vue approximative</b> — xhprof ne conserve que des
+données agrégées appelant&nbsp;→&nbsp;appelé, pas les frames d’appel : les
+largeurs des cadres sont des estimations et non des frames exactes. Ce graphe
+sert d’aperçu de navigation ; les chiffres exacts sont dans les rapports
+tabulaire et parent/enfant.</li>
+<li><b>Exports</b> — JSON, CSV et callgrind :
+<code>report.php?run=&lt;id&gt;&amp;source=&lt;source&gt;&amp;format=json|csv|callgrind</code>.</li>
+<li><b>Outils en ligne de commande</b> — <code>bin/xhprofile</code> (profiler un
+script), <code>bin/xhprof-report</code> (rapport tabulaire au terminal),
+<code>bin/xhprof-diff</code> (détection de régression, code de sortie non nul
+au-delà du seuil).</li>
+<li><b>Démarrage rapide Docker</b> — <code>docker compose up</code> puis
+<code>http://localhost:8080</code>.</li>
+</ul>
 
 <b>Sommaire</b>
 <ol>

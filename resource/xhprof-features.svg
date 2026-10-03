@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 580" width="1000" height="580" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">xhprof 项目功能 — 功能矩阵</title>
+  <desc id="desc">xhprof 功能矩阵：精确分层剖析、采样模式、五项指标、运行列表与一键对比、分层 DIFF、聚合、调用图、近似火焰图、导出三格式、CLI 回归门禁、Docker 一键演示、XHGui 对接、PHP 7.2–8.6 兼容、profiler 零开销门控。</desc>
+  <style>
+    text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue','Noto Sans SC','Source Han Sans CN','PingFang SC','Microsoft YaHei',sans-serif}
+    .mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,'DejaVu Sans Mono',monospace}
+    .h1{font-size:21px;font-weight:700;fill:#1c2b4a}
+    .sub{font-size:12px;fill:#4c6cb5}
+    .tt{font-size:12.5px;font-weight:600;fill:#1c2b4a}
+    .tx{font-size:10.5px;fill:#4c6cb5}
+    .mn{font-size:10px;fill:#3b5998}
+    .ic{fill:none;stroke:#3b5998;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    .icf{fill:#3b5998}
+    .ico{stroke:#ff8b3d}
+    .icof{fill:#ff8b3d}
+  </style>
+  <defs>
+    <marker id="m1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0 1 9 5 0 9z" fill="#3b5998"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="580" rx="16" fill="#ffffff" stroke="#c3d9ff"/>
+
+  <text class="h1" x="32" y="42">项目功能 · Features</text>
+  <text class="sub" x="32" y="64">从采集到呈现的完整能力矩阵 —— 精确剖析、采样、对比、导出、CLI 门禁与生态对接</text>
+
+  <!-- ================= row 1 ================= -->
+  <g>
+    <rect x="28" y="86" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="44" y="100" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <rect class="ic" x="52" y="106" width="14" height="4.5" rx="1.5"/>
+    <rect class="ic" x="52" y="113.5" width="14" height="4.5" rx="1.5"/>
+    <rect class="ic" x="52" y="121" width="14" height="4.5" rx="1.5"/>
+    <text class="tt" x="84" y="120">精确分层剖析</text>
+    <text class="mn mono" x="44" y="152">"caller==&gt;callee" 逐层记录</text>
+    <text class="tx" x="44" y="170">五个指标同时采集</text>
+  </g>
+  <g>
+    <rect x="268" y="86" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="284" y="100" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <circle class="ic" cx="299" cy="115" r="9"/>
+    <path class="ic" d="M299 109 V115 L303.5 117.5"/>
+    <text class="tt" x="324" y="120">采样模式</text>
+    <text class="mn mono" x="284" y="152">xhprof_sample_enable()</text>
+    <text class="tx" x="284" y="170">低开销定时采样，可配间隔</text>
+  </g>
+  <g>
+    <rect x="508" y="86" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="524" y="100" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <circle class="icf" cx="532" cy="115" r="2.6"/>
+    <circle class="icf" cx="539.5" cy="115" r="2.6"/>
+    <circle class="icf" cx="547" cy="115" r="2.6"/>
+    <circle class="icf" cx="532" cy="122.5" r="2.6"/>
+    <circle class="icof" cx="539.5" cy="122.5" r="2.6"/>
+    <text class="tt" x="564" y="120">五项指标</text>
+    <text class="mn mono" x="524" y="152">wt · ct · cpu · mu · pmu</text>
+    <text class="tx" x="524" y="170">墙钟 / 自身 / CPU / 内存 / 峰值</text>
+  </g>
+  <g>
+    <rect x="748" y="86" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="764" y="100" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <path class="ic" d="M770 108 H782 M770 115 H788 M770 122 H782"/>
+    <path class="ic ico" d="M784 112 L789 117 L784 122"/>
+    <text class="tt" x="804" y="120">运行列表与一键对比</text>
+    <text class="mn mono" x="764" y="152">index.php 列出全部 run</text>
+    <text class="tx" x="764" y="170">勾选两次运行直接 DIFF</text>
+  </g>
+
+  <!-- ================= row 2 ================= -->
+  <g>
+    <rect x="28" y="208" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="44" y="222" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <rect class="ic" x="51" y="230" width="13" height="13" rx="2"/>
+    <rect class="ic ico" x="57" y="236" width="13" height="13" rx="2"/>
+    <text class="tt" x="84" y="242">分层 DIFF</text>
+    <text class="mn mono" x="44" y="274">xhprof_disable + 基线对比</text>
+    <text class="tx" x="44" y="292">按增量排序，定位劣化函数</text>
+  </g>
+  <g>
+    <rect x="268" y="208" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="284" y="222" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <path class="ic" d="M288 228 V234 H305 M288 236 V242 H305" marker-end="url(#m1)"/>
+    <rect class="ic" x="305" y="230" width="6" height="12" rx="1.5"/>
+    <text class="tt" x="324" y="242">聚合 · Aggregate</text>
+    <text class="tx" x="284" y="274">把多次运行合并为一份统计</text>
+    <text class="tx" x="284" y="292">权重累加，抹平单次抖动</text>
+  </g>
+  <g>
+    <rect x="508" y="208" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="524" y="222" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <path class="ic" d="M530 245 L539 231 L548 245"/>
+    <circle class="icf" cx="530" cy="245" r="2.4"/>
+    <circle class="icf" cx="548" cy="245" r="2.4"/>
+    <circle class="icf" cx="539" cy="231" r="2.4"/>
+    <text class="tt" x="564" y="242">调用图</text>
+    <text class="mn mono" x="524" y="274">callgraph.php</text>
+    <text class="tx" x="524" y="292">按父 / 子调用关系逐层考察</text>
+  </g>
+  <g>
+    <rect x="748" y="208" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="764" y="222" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <path class="ic ico" d="M769 244 H789 M772 238 H786 M776 232 H782"/>
+    <text class="tt" x="804" y="242">近似火焰图</text>
+    <text class="mn mono" x="764" y="274">flamegraph.php（近似）</text>
+    <text class="tx" x="764" y="292">由扁平数组重建分层视图</text>
+  </g>
+
+  <!-- ================= row 3 ================= -->
+  <g>
+    <rect x="28" y="330" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="44" y="344" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <path class="ic" d="M52 352 H62 L68 358 V368 H52 Z"/>
+    <path class="ic" d="M62 352 V358 H68"/>
+    <path class="ic ico" d="M55 363 H65"/>
+    <text class="tt" x="84" y="364">导出三格式</text>
+    <text class="mn mono" x="44" y="396">callgrind · JSON · CSV</text>
+    <text class="tx" x="44" y="414">对接 KCachegrind 等工具</text>
+  </g>
+  <g>
+    <rect x="268" y="330" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="284" y="344" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <rect class="ic" x="289" y="350" width="20" height="18" rx="2.5"/>
+    <path class="ic ico" d="M293 356 L297 360 L293 364"/>
+    <path class="ic" d="M300 364 H306"/>
+    <text class="tt" x="324" y="364">CLI 回归门禁</text>
+    <text class="mn mono" x="284" y="396">xhprof-report · xhprof-diff</text>
+    <text class="tx" x="284" y="414">挂进 CI：断言性能不劣化</text>
+  </g>
+  <g>
+    <rect x="508" y="330" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="524" y="344" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <rect class="ic" x="530" y="352" width="18" height="14" rx="2"/>
+    <path class="ic" d="M534 352 V349 M544 352 V349"/>
+    <path class="ic ico" d="M536 359 H542"/>
+    <text class="tt" x="564" y="364">Docker 一键演示</text>
+    <text class="mn mono" x="524" y="396">docker compose up</text>
+    <text class="tx" x="524" y="414">内置示例与报表页，开箱即跑</text>
+  </g>
+  <g>
+    <rect x="748" y="330" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="764" y="344" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <circle class="ic" cx="775" cy="359" r="4.5"/>
+    <circle class="ic ico" cx="783" cy="359" r="4.5"/>
+    <path class="ic" d="M779.5 359 H778.5 M775 363.5 V364"/>
+    <text class="tt" x="804" y="364">XHGui 对接</text>
+    <text class="mn mono" x="764" y="396">save_run 契约即接口</text>
+    <text class="tx" x="764" y="414">按外部配方接入 XHGui</text>
+  </g>
+
+  <!-- ================= row 4 (2 cards, grid-aligned) ================= -->
+  <g>
+    <rect x="268" y="452" width="222" height="104" rx="8" fill="#ffffff" stroke="#c3d9ff"/>
+    <rect x="284" y="466" width="30" height="30" rx="7" fill="#eef3fb" stroke="#c3d9ff"/>
+    <rect class="ic" x="289" y="475" width="20" height="16" rx="3"/>
+    <path class="ic ico" d="M299 488 V479 M295 482.5 L299 478.5 L303 482.5"/>
+    <text class="tt" x="324" y="486">PHP 7.2 – 8.6</text>
+    <text class="tx" x="284" y="518">覆盖 7.2 至 8.6 的 CI 矩阵验证</text>
+    <text class="tx" x="284" y="536">含 Windows 构建与测试</text>
+  </g>
+  <g>
+    <rect x="508" y="452" width="222" height="104" rx="8" fill="#ffffff" stroke="#ff8b3d"/>
+    <rect x="524" y="466" width="30" height="30" rx="7" fill="#fff7f0" stroke="#ff8b3d"/>
+    <rect class="ic ico" x="528" y="476" width="22" height="11" rx="5.5"/>
+    <circle class="icof" cx="534" cy="481.5" r="3.2"/>
+    <text class="tt" x="564" y="486">profiler 零开销门控</text>
+    <text class="mn mono ico" x="524" y="518">xhprof.profiler=0 → 不注册钩子</text>
+    <text class="tx" x="524" y="536">生产环境可全程关闭，零成本</text>
+  </g>
+</svg>

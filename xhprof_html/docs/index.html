@@ -1,835 +1,477 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>
-XHProf Documentation (Draft)
-</title>
+<title>XHProf — User Guide</title>
 <style>
-  body { max-width: 52rem; margin: 0 auto; padding: 1rem; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { max-width: 52rem; margin: 0 auto; padding: 1rem; font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Helvetica, Arial, sans-serif; line-height: 1.5; }
   code, pre { background: #f4f4f4; }
   pre { overflow-x: auto; padding: .5rem; }
+  code { padding: .1rem .25rem; border-radius: 3px; }
+  pre code { padding: 0; background: none; }
+  img { max-width: 100%; height: auto; border: 1px solid #ccc; }
+  figure { margin: 1rem 0; }
+  figcaption { color: #555; font-size: .9rem; }
+  table { border-collapse: collapse; margin: .5rem 0; }
+  th, td { border: 1px solid #ccc; padding: .3rem .5rem; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .toc { background: #fafafa; border: 1px solid #e0e0e0; padding: .25rem 1rem; }
+  .note { background: #eef4ff; border-left: 4px solid #6b8fc4; padding: .5rem .75rem; margin: 1rem 0; }
+  .warn { background: #fff3cd; border-left: 4px solid #e0c060; padding: .5rem .75rem; margin: 1rem 0; }
+  .lang { text-align: right; font-size: .9rem; }
 </style>
 </head>
 <body>
-<h3>XHProf Documentation (Draft)</h3>
 
-<b>Contents</b>
+<p class="lang"><a href="index-fr.html">Français</a> (translation, may lag behind this page)</p>
+
+<h1>XHProf — User Guide</h1>
+
+<p>XHProf is a hierarchical profiler for PHP: the <code>xhprof</code> extension
+(see <code>extension/</code>) records call counts and inclusive wall time, CPU
+time and memory numbers per function while your code runs, and the PHP pages
+in <code>xhprof_html/</code> report on the runs that were saved.</p>
+
+<p>This guide describes the reports in <code>xhprof_html/</code>. Installing the
+extension, the <code>xhprof.*</code> INI settings and how to collect runs are
+covered in the <a href="../../README.md">README</a>.</p>
+
+<div class="toc">
+<p><b>Contents</b></p>
 <ol>
-<li><a href="#introduction">Introduction</a></li>
-
-<li><a href="#overview">XHProf Overview</a></li>
-
-<li><a href="#installation">Installing the XHProf extension</a></li>
-
-<li><a href="#using_extension">Profiling using XHProf</a></li>
-
-<li><a href="#ui_setup">Setting up the XHProf UI</a></li>
-
-<li><a href="#production_notes">Notes on using XHProf in production</a></li>
-
-<li><a href="#sampling_mode">Lightweight Sampling Mode</a>
-
-<li><a href="#misc">Additional features</a></li>
-
-<li><a href="#dependencies">Dependencies</a></li>
-
-<li><a href="#credits">Acknowledgements</a></li>
+<li><a href="#runlist">The run list</a></li>
+<li><a href="#flat">Flat report (single run)</a></li>
+<li><a href="#parentchild">Parent/child report</a></li>
+<li><a href="#diff">Diff report (two runs)</a></li>
+<li><a href="#aggregate">Aggregate report</a></li>
+<li><a href="#callgraph">Callgraph</a></li>
+<li><a href="#flamegraph">Flame graph (approximate)</a></li>
+<li><a href="#export">Exporting a run (JSON / CSV / callgrind)</a></li>
+<li><a href="#typeahead">Typeahead (“jump to function…”)</a></li>
+<li><a href="#cli">Command line tools</a></li>
+<li><a href="#faq">Troubleshooting</a></li>
 </ol>
+</div>
 
-<ol>
-<li><a name="introduction"><h2>Introduction</h2></a>
+<p>Runs are stored by the default <code>XHProfRuns_Default</code> implementation
+as files named <code>&lt;run_id&gt;.&lt;source&gt;.xhprof</code> in the directory
+given by the <code>xhprof.output_dir</code> INI setting (the
+<code>XHPROF_OUTPUT_DIR</code> environment variable also works). Everything the
+UI shows comes from that directory, so point your web server at
+<code>xhprof_html/</code>, make sure the PHP user can read the run directory,
+and open <a href="../index.php">index.php</a>.</p>
 
-<p>XHProf is a hierarchical profiler for PHP.  It reports
-function-level call counts and <a href="#inclusive">inclusive</a> and
-<a href="#exclusive">exclusive</a> metrics such as wall (elapsed)
-time, CPU time and memory usage. A function's profile can be broken
-down by callers or callees. The raw data collection component is
-implemented in C as a PHP Zend extension called
-<code><b>xhprof</b></code>. XHProf has a simple HTML based user
-interface (written in PHP). The browser based UI for viewing profiler
-results makes it easy to view results or to share results with peers.
-A callgraph image view is also supported.
+<p><b>Terminology.</b> <b>Inclusive</b> (subtree) time of a function includes the
+time of the functions it calls; <b>exclusive</b> (self) time is the time spent in
+the function itself. <b>wt</b> is wall time in microseconds, <b>mu</b> is the
+change in PHP memory usage in bytes and <b>pmu</b> the change in peak memory.
+<code>main()</code> is the fictitious root of the call graph, and recursive
+calls appear as <code>foo@1</code>, <code>foo@2</code>, …</p>
 
-<p>XHProf reports can often be helpful in understanding the structure
-of the code being executed. The hierarchical nature of the reports can
-be used to determine, for example, what chain of calls led to a
-particular function getting called.
+<h2 id="runlist">1. The run list</h2>
 
-<p>XHProf supports ability to compare two runs (a.k.a. "diff" reports)
-or aggregate data from multiple runs. Diff and aggregate reports, much
-like single run reports, offer "flat" as well as "hierarchical" views
-of the profile.
-
-<p>XHProf is a light-weight instrumentation based profiler. During the
-data collection phase, it keeps track of call counts and inclusive
-metrics for arcs in the dynamic callgraph of a program. It computes
-exclusive metrics in the reporting/post processing phase. XHProf
-handles recursive functions by detecting cycles in the callgraph at
-data collection time itself and avoiding the cycles by giving unique
-depth qualified names for the recursive invocations.
-</p>
-
-<p>XHProf's light-weight nature and aggregation capabilities make it
-well suited for collecting "function-level" performance statistics
-from production environments. [See <a
-href="#production_notes">additional notes</a> for use in production.]
+<p>Opening <a href="../index.php">index.php</a> without parameters lists the
+saved runs, newest first (the timestamp next to each entry is the run file’s
+modification time). The file name holds both identifiers you need: the run id
+and the source (namespace) it was saved under.</p>
 
 <ul>
-<hr>
-
-<p>XHProfLive (not part of the open source kit), for example, is a
-system-wide performance monitoring system in use at Facebook that is
-built on top of XHProf.  XHProfLive continually gathers function-level
-profiler data from production tier by running a sample of page
-requests under XHProf. XHProfLive then aggregates the profile data
-corresponding to individual requests by various dimensions such as
-time, page type, and can help answer a variety of questions such as:
-What is the function-level profile for a specific page? How expensive
-is function "foo" across all pages, or on a specific page? What
-functions regressed most in the last hour/day/week? What is the
-historical trend for execution time of a page/function? and so on.
-
-<hr>
+<li>Click a file name to open the <a href="#flat">flat report</a> for that run:
+<code>index.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;</code>.</li>
+<li>Tick exactly two checkboxes and click <b>Compare selected</b> to open the
+<a href="#diff">diff report</a> for them.</li>
 </ul>
 
+<p><b>Compare selected</b> uses the run <em>higher in the list</em> (the newer
+run) as run1 and the other as run2 — the tick order does not matter. The source
+(namespace) used for the diff is the source of that same first-in-list run, so
+compare runs saved under the same namespace; ticking a different number of boxes
+than two pops up “Check exactly two runs to compare them.”</p>
 
-<p>Originally developed at Facebook, XHProf was open sourced in Mar, 2009.</p>
+<p>The button is a shortcut for the URL
+<code>index.php?run1=&lt;id1&gt;&amp;run2=&lt;id2&gt;&amp;source=&lt;source&gt;</code>,
+so a diff can be linked to directly — both forms open the same report.</p>
 
+<h2 id="flat">2. Flat report (single run)</h2>
 
-</ul>
+<p>The flat report summarizes one run. The header names the run
+(<code>Run #&lt;run_id&gt;: XHProf Run (Namespace=&lt;source&gt;)</code>) and the
+<b>Overall Summary</b> table gives the run totals per metric plus the number of
+function calls.</p>
 
+<figure>
+<a href="sample-flat-view.jpg"><img src="sample-flat-view.jpg" alt="Flat report: overall summary, callgraph and export links, and the sortable table of functions"></a>
+<figcaption>The flat report: totals, links to other views, and the table of
+functions. Every column header is a sort link; the column currently sorted on is
+shown in bold.</figcaption>
+</figure>
 
-<li><a name="overview"><h2>XHProf Overview</h2></a>
-
-<p>XHProf provides:
+<p><b>Columns.</b> One row per function, with</p>
 
 <ul>
-<li><b>Flat profile</b> (<a href="sample-flat-view.jpg" >screenshot</a>)
+<li><b>Calls</b> and <b>Calls%</b> — call count and its share of all calls;</li>
+<li>for every metric the run carries (wall time, and CPU / memory if it was
+collected): the inclusive value, its percentage of the run total, the exclusive
+value and its percentage of the run total.</li>
+</ul>
 
-<p>Function-level summary information such as number of calls,
-inclusive/exclusive wall time, memory usage, and CPU time.
+<p><b>Sorting.</b> Click a column header to sort by it: numeric columns sort
+descending, <b>Function Name</b> sorts ascending (case-insensitively). The
+header of the current sort column is highlighted in bold.</p>
 
-<p><li><b>Hierarchical profile (Parent/Child View)</b>
-(<a href="sample-parent-child-view.jpg" >screenshot</a>)
+<p><b>Top 100.</b> Only the top 100 rows are shown by default
+(“Displaying top 100 functions: Sorted by …”); the
+<b>[ display all ]</b> link next to the title — and at the bottom of the
+table — switches to every function (<code>&amp;all=1</code>).</p>
 
-<p>For each function, it provides a breakdown of calls and times per
-parent (caller) & child (callee), such as:
+<p>Clicking a function name opens its <a href="#parentchild">parent/child
+report</a>. Above the table, <b>[View Full Callgraph]</b> opens the
+<a href="#callgraph">callgraph</a> and the <b>Export</b> line links the
+<a href="#flamegraph">flame graph</a> and the
+<a href="#export">JSON / CSV / callgrind</a> exports.</p>
+
+<h2 id="parentchild">3. Parent/child report</h2>
+
+<p>Clicking a function in any flat report (or picking it in the typeahead box)
+drills into that function: the report is scoped to it — the title reads
+<b>Parent/Child report for &lt;function&gt;</b> — and shows, in one table:</p>
 
 <ul>
-
-<li> what functions call a particular function and how many times?
-
-<li> what functions does a particular function call?
-
-<li> The total time spent under a function when called from a particular parent.
-
+<li>the <b>Current Function</b> row, highlighted in yellow: the function’s own
+totals, with its share of the whole run in the percentage columns;</li>
+<li>the <b>Exclusive Metrics</b> row: the function’s self cost, with each value as
+a percentage of its own inclusive value;</li>
+<li><b>Parent functions</b>: every caller, with the calls and inclusive metrics
+attributed to calls <em>from that caller</em>;</li>
+<li><b>Child functions</b>: every callee of the function.</li>
 </ul>
 
-<p><li><b>Diff Reports</b>
+<p>Each parent and child row carries a small bar whose width is the row’s share
+of the function’s inclusive metric (of the first metric shown, normally wall
+time), so the heaviest callers and callees stand out at a glance. Hovering the
+metric cells of a parent or child row shows the fraction behind its percentage —
+for a child row of the example below: “score_row when called from render_report
+takes 1,160 of walltime, which is 53.8% of the inclusive walltime for
+render_report (2,156)”; a parent row gets the mirror wording (“… is due to calls
+from main()”).</p>
 
-<p>You may want to compare data from two XHProf runs for various
-reasons-- to figure out what's causing a regression between one
-version of the code base to another, to evaluate the performance
-improvement of a code change you are making, and so on.
+<figure>
+<a href="sample-parent-child-view.jpg"><img src="sample-parent-child-view.jpg" alt="Parent/child report: the current function row highlighted, the exclusive metrics row, and parent and child tables with share bars"></a>
+<figcaption>Parent/child report for a function called from
+<code>main()</code> with six callees; the bars show each callee’s share of the
+function’s inclusive wall time.</figcaption>
+</figure>
 
-<p>A diff report takes two runs as input and provides both flat
-function-level diff information, and hierarchical information
-(breakdown of diff by parent/children functions) for each function.
+<p>The <b>[View Callgraph]</b> link next to the title opens the
+<a href="#callgraph">callgraph</a> focused on this function (its direct parents
+and children only). The current function’s name is also a link to the same page,
+so the URL can be copied from the address bar and pasted into a mail or ticket.</p>
 
-<p>The "flat" view (<a href="sample-diff-report-flat-view.jpg"
->sample screenshot</a>) in the diff report points out the top
-regressions & improvements.
+<h2 id="diff">4. Diff report (two runs)</h2>
 
-<p>Clicking on functions in the "flat" view of the diff report, leads
-to the "hierarchical" (or parent/child) diff view of a function (<a href="sample-diff-report-parent-child-view.jpg"
->sample screenshot</a>). We can get a
-breakdown of the diff by parent/children functions.
-
-
-<p><li><b>Callgraph View</b> (<a href="sample-callgraph-image.jpg"
->sample screenshot</a>)
-
-<p>The profile data can also be viewed as a callgraph. The callgraph
-view highlights the critical path of the program.
-
-
-<p><li><b>Memory Profile</b>
-
-<p>XHProf's memory profile mode helps track functions that
-allocate lots of memory.
-
-<p>It is worth clarifying that that XHProf doesn't strictly track each
-allocation/free operation.  Rather it uses a more simplistic
-scheme. It tracks the increase/decrease in the amount of memory
-allocated to PHP between each function's entry and exit. It also
-tracks increase/decrease in the amount of <b>peak</b> memory allocated to
-PHP for each function.
-
-<li>XHProf tracks <code>include, include_once, require and
-require_once</code> operations as if they were functions. The name of
-the file being included is used to generate the name for these <a
-href="#include_funcs">"fake" functions</a>.
-
-
-</ul>
-
-<a name="Terminology"></a><h2>Terminology</h2>
-<ol>
-
-<a name="inclusive"></a><li><b>Inclusive Time (or Subtree Time)</b>:
-Includes time spent in the function as well as in descendant functions
-called from a given function.
-
-<a name="exclusive"></a><li><b>Exclusive Time/Self Time</b>: Measures
-time spent in the function itself. Does not include time in descendant
-functions.
-
-<li><b>Wall Time</b>: a.k.a. Elapsed time or wall clock time.
-
-<li><b>CPU Time</b>: CPU time in user space + CPU time in kernel space
-
-</ol>
-<a name="Naming_convention_for_special_functions"></a><h2>Naming convention for special functions</h2>
+<p>To compare two runs — to find what regressed between two builds, or to check
+what a change bought you — open the diff report. There are two entry points,
+both described in <a href="#runlist">the run list</a>:</p>
 
 <ol>
-<p><li><code><b>main()</b></code>: a fictitious function that is at the root of the call graph.
-
-<a name="include_funcs"></a>
-<p><li><code><b>load::&lt;filename&gt;</b></code>
-and <code><b>run_init::&lt;filename&gt;</b></code>:
-
-<p>XHProf tracks PHP <code>include/require</code> operations as
-function calls.
-
-<p>For example, an <b>include "lib/common.php";</b> operation will
-result in two XHProf function entries:
-
-<ul>
-
-<li> <code><b>load::lib/common.php</b></code> - This represents the work done by the
-interpreter to compile/load the file. [Note: If you are using a PHP
-opcode cache like APC, then the compile only happens on a cache miss
-in APC.]
-
-<li> <code><b>run_init::lib/common.php</b></code> - This represents
-initialization code executed at the file scope as a result of the
-include operation.
-
-</ul>
-
-<p><li><code><b>foo@&lt;n&gt;</b></code>: Implies that this is a
-recursive invocation of <code>foo()</code>, where <code>&lt;n&gt;</code> represents
-the recursion depth. The recursion may be direct (such as due to
-<code>foo()</code> --&gt; <code>foo()</code>), or indirect (such as
-due to </code>foo()</code> --&gt; <code>goo()</code> --&gt; foo()).
-
+<li>tick two runs there and click <b>Compare selected</b>; or</li>
+<li>link to <code>index.php?run1=&lt;baseline&gt;&amp;run2=&lt;candidate&gt;&amp;source=&lt;source&gt;</code>.</li>
 </ol>
 
+<p>Run1 is the baseline, run2 the run being compared against it; every number in
+the report is <code>run2 − run1</code>. The action list offers
+<b>View Run #…</b> links for both sides and <b>Invert Diff Report</b>, which
+swaps run1 and run2.</p>
 
-<a name="Limitations"></a><h2>Limitations</h2>
+<p>An <b>Overall Diff Summary</b> table at the top shows the totals of both runs,
+their absolute difference and the difference as a percentage of run1. In the
+tables below, <span style="color:red">red</span> marks a <b>regression</b> — a
+positive difference, so the function costs more in run2 — and
+<span style="color:green">green</span> an <b>improvement</b>.</p>
 
-<p>True hierarchical profilers keep track of a full call stack at
-every data gathering point, and are later able to answer questions
-like: what was the cost of the 3rd invokation of foo()? or what was
-the cost of bar() when the call stack looked like
-a()-&gt;b()-&gt;bar()?
+<figure>
+<a href="sample-diff-report-flat-view.jpg"><img src="sample-diff-report-flat-view.jpg" alt="Diff report: overall diff summary and the top 100 regressions/improvements table"></a>
+<figcaption>Top of a diff report. The flat table is titled “Top 100
+Regressions/Improvements” and is sorted by the absolute value of the
+difference, so the biggest movers of either sign come first
+(<b>[ display all ]</b> shows every function).</figcaption>
+</figure>
 
-</p>
+<p>Clicking a function opens the <b>Regression/Improvement summary</b> for it:
+calls, inclusive wall time, inclusive wall time per call, and exclusive wall
+time (and the same for every other collected metric), each with the values in
+both runs, the delta and the delta percentage; below it, the parent/child diff
+shows which callers and callees the change is coming from.</p>
 
-<p>XHProf keeps track of only 1-level of calling context and is
-therefore only able to answer questions about a function looking
-either 1-level up or 1-level down. It turns out that in practice this
-is sufficient for most use cases.
-</p>
+<figure>
+<a href="sample-diff-report-parent-child-view.jpg"><img src="sample-diff-report-parent-child-view.jpg" alt="Diff report for one function: regression/improvement summary and the parent/child diff table"></a>
+<figcaption>Per-function diff: the summary rows above, the parent/child diff
+below. Here <code>build_index</code> went from 24&nbsp;µs to
+142&nbsp;µs (+491.7%) across <code>array_search</code>.</figcaption>
+</figure>
 
-<p>To make this more concrete, take for instance the following
-example.
-</p>
+<p>For a visual take, a diff report links
+<b>[View Regressions/Improvements using Callgraph Diff]</b> to a
+<a href="#callgraph">callgraph</a> of the change.</p>
 
-<pre>
-Say you have:
- 1 call from a() --&gt; c()
- 1 call from b() --&gt; c()
- 50 calls from c() --&gt; d()
-</pre>
+<h2 id="aggregate">5. Aggregate report</h2>
 
-<p>While XHProf can tell you that d() was called from c() 50 times, it
-cannot tell you how many of those calls were triggered due to a()
-vs. b(). [We could speculate that perhaps 25 were due to a() and 25
-due to b(), but that's not necessarily true.]
-</p>
+<p>A run parameter can name several runs of the same source, comma-separated:
+<code>index.php?run=&lt;id1&gt;,&lt;id2&gt;,&lt;id3&gt;&amp;source=&lt;source&gt;</code>.
+The UI aggregates them into one report (flat and parent/child views work exactly
+as for a single run) and the header shows
+“Aggregated Report for N runs: … ” so the numbers are not mistaken for a single
+profile. Because call counts are averaged over the runs, they can be
+fractional; invalid run ids in the list are skipped, and the header names them
+(<code>skipped invalid runs: …</code>).</p>
 
-<p>In practice however, this isn't a very big limitation.
-</p>
+<p><b>Weighted aggregation.</b> Add <code>wts=</code> with one weight per run to
+give each run its share of the mix — for example three page types that occur in
+a 20 / 30 / 50 mix:</p>
 
-<li><a name="installation"><h2>Installing the XHProf Extension</h2></a>
+<pre><code>index.php?run=1,2,3&amp;wts=20,30,50&amp;source=benchmark</code></pre>
 
-<p> The extension lives in the "extension/" sub-directory.
+<div class="warn">The weight list must have exactly one entry per run; any other
+count makes the page fail with “Could not load XHProf run: Invalid input..”.</div>
 
-<ul><hr>
+<h2 id="callgraph">6. Callgraph</h2>
 
-<p><b>Note:</b> A windows port hasn't been implemented yet. We have
-tested <code>xhprof</code> on <b>Linux/FreeBSD</b> so far. 
+<p><b>[View Full Callgraph]</b> (on any flat report) and
+<b>[View Callgraph]</b> (on a parent/child report) render the run as a directed
+graph: a box per function, an arrow per caller&nbsp;→&nbsp;callee edge, with
+inclusive / exclusive time and call counts inside each box. The critical path is
+highlighted. The focused callgraph (from a parent/child report) shows only the
+function’s direct parents and children, which keeps a big run readable.</p>
 
-<p>Version 0.9.2 and above of XHProf is also expected to work on <b>Mac
-OS</b>. [We have tested on Mac OS 10.5.]
+<figure>
+<a href="sample-callgraph-image.jpg"><img src="sample-callgraph-image.jpg" alt="Callgraph image: function boxes connected by caller to callee arrows, the critical path highlighted"></a>
+<figcaption>A callgraph of one run. The focused views (“View Callgraph” on a
+function) draw the same picture around one function only.</figcaption>
+</figure>
 
-<p><b>Note:</b> XHProf uses the RDTSC instruction (time stamp counter)
-to implement a really low overhead timer for elapsed time. So at the
-moment <code>xhprof</code> only works on <b>x86</b> architecture.
-Also, since RDTSC values may not be synchronized across CPUs,
-<code>xhprof</code> binds the program to a single CPU during the
-profiling period.
+<p>The picture is generated by Graphviz’s <code>dot</code>, which must be
+installed and on <code>PATH</code> (the Docker image in the README includes
+it). Useful parameters for <code>callgraph.php</code>:</p>
 
-<p>XHProf's RDTSC based timer functionality doesn't work correctly if
-<b>SpeedStep</b> technology is turned on. This technology is available on
-some Intel processors. [Note: Mac desktops and laptops typically have
-SpeedStep turned on by default. To use XHProf, you'll need to disable
-SpeedStep.]
+<table>
+<tr><th>Parameter</th><th>Meaning</th></tr>
+<tr><td><code>run</code>, <code>source</code></td><td>the run to draw</td></tr>
+<tr><td><code>run1</code>, <code>run2</code></td><td>draw a diff callgraph instead of a single run</td></tr>
+<tr><td><code>func</code></td><td>focus on one function (direct parents/children only)</td></tr>
+<tr><td><code>threshold</code></td><td>only functions whose exclusive time is at least this fraction of the run total are drawn (default <code>0.01</code>, i.e. 1%)</td></tr>
+<tr><td><code>type</code></td><td>image format: <code>svg</code> (default), <code>png</code>, <code>jpg</code>, <code>gif</code>, <code>ps</code></td></tr>
+<tr><td><code>critical</code></td><td><code>1</code> (default) highlights the critical path, <code>0</code> turns the highlight off</td></tr>
+</table>
 
-<hr></ul>
+<h2 id="flamegraph">7. Flame graph (approximate)</h2>
 
-<p> The steps
-below should work for Linux/Unix environments.
+<div class="note"><b>Approximate view.</b> XHProf only stores aggregated
+caller&nbsp;→&nbsp;callee data — one row per pair, summed over every call — not
+the individual call frames a real flame graph is built from. This view
+apportions each function’s inclusive metric over its outgoing calls by each
+edge’s share, and the remainder becomes the function’s self time. Frame widths
+are therefore estimates, not exact call frames — treat the picture as a
+navigational overview, and confirm anything interesting in the flat and
+parent/child reports, whose numbers are exact. (The page itself carries the same
+warning.)</div>
 
+<p>Open it from the <b>Flame Graph (approximate)</b> link on a run’s report, or
+directly:</p>
 
-<pre>
-% cd &lt;xhprof_source_directory&gt;/extension/
-% phpize
-% ./configure --with-php-config=&lt;path to php-config&gt;
-% make
-% make install
-% make test
-</pre>
+<pre><code>flamegraph.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;</code></pre>
 
+<figure>
+<a href="sample-flamegraph.jpg"><img src="sample-flamegraph.jpg" alt="Approximate flame graph with the warning banner, breadcrumb and coloured frames"></a>
+<figcaption>The approximate flame graph: <code>main()</code> at the bottom,
+callees stacked above their callers. Hover a frame for its width and self time,
+click one to zoom into it, and use the breadcrumb (or <b>[reset]</b>) to zoom
+back out.</figcaption>
+</figure>
 
-<p><a name="ini_file"></a><b>php.ini file</b>: You can update your
-php.ini file to automatically load your extension.  Add the following
-to your php.ini file.
+<p><b>Widths and metrics.</b> The width of a frame is its share of the metric
+shown in the title. By default that is wall time (<code>wt</code>); pass
+<code>metric=</code> to use another one (for example <code>mu</code>). If the run
+carries no such metric — a wall-time-only run has no <code>cpu</code>, for
+instance — the page falls back to the first metric the run actually has, and the
+title shows which metric is in use.</p>
 
-<pre>
-[xhprof]
-extension=xhprof.so
-;
-; directory used by default implementation of the iXHProfRuns
-; interface (namely, the XHProfRuns_Default class) for storing
-; XHProf runs.
-;
-xhprof.output_dir=&lt;directory_for_storing_xhprof_runs&gt;
-</pre>
+<p><b>Threshold.</b> Frames narrower than a fraction of the run (0.01 of the
+total by default) are folded into a grey <b>(others)</b> frame instead of being
+dropped, so nothing leaks out of the picture. The threshold is set in the form
+under the graph (<code>&amp;threshold=0.05</code> folds everything below 5%).</p>
 
+<h2 id="export">8. Exporting a run (JSON / CSV / callgrind)</h2>
 
-<li><a name="using_extension"><h2>Profiling using XHProf</h2></a>
+<p>Every single-run report carries an <b>Export</b> line under the summary —
+<em>Flame Graph (approximate) | JSON | CSV | callgrind</em> — and the exports
+have direct URLs too:</p>
 
-<p>Test generating raw profiler data using a sample test program like:
+<pre><code>report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=json       # JSON
+report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=csv        # CSV (download)
+report.php?run=&lt;run_id&gt;&amp;source=&lt;source&gt;&amp;format=callgrind  # callgrind (download)</code></pre>
 
 <ul>
-<p><b>foo.php</b>
-<pre>
-&lt;?php
-
-function bar($x) {
-  if ($x > 0) {
-    bar($x - 1);
-  }
-}
-
-function foo() {
-  for ($idx = 0; $idx < 2; $idx++) {
-    bar($idx);
-    $x = strlen("abc");
-  }
-}
-
-// start profiling
-<b>xhprof_enable();</b>
-
-// run program
-foo();
-
-// stop profiler
-<b>$xhprof_data = xhprof_disable();</b>
-
-// display raw xhprof data for the profiler run
-print_r($xhprof_data);
-</pre>
+<li><b>JSON</b> — the flat per-function numbers plus the run totals:
+<code>run</code>, <code>source</code>, <code>description</code>,
+<code>metrics</code>, <code>totals</code>, and a <code>functions</code> array
+whose entries carry <code>fn</code>, call count and each inclusive metric next
+to its <code>excl_</code> counterpart. Handy for scripts, dashboards, or your
+own diffing.</li>
+<li><b>CSV</b> — one row per function: <code>fn</code>, <code>ct</code> and then
+<code>&lt;metric&gt;,excl_&lt;metric&gt;</code> for every metric the run carries,
+with a final <code>TOTAL</code> row (the exclusive columns of that row are empty
+— there is no per-run exclusive total).</li>
+<li><b>callgrind</b> — the run in Valgrind’s profile exchange format for
+<a href="https://apps.kde.org/kcachegrind/">KCachegrind</a> / QCachegrind: per-function
+self cost and one <code>cfn=</code> entry per caller&nbsp;→&nbsp;callee edge.
+XHProf records no source positions, so every cost is filed under line 0 and all
+calls between a pair are lumped into one entry — useful for callee-level
+analysis, but not for line-level attribution.</li>
 </ul>
 
-<p><b>Run the above test program:</b>
-
-<pre>
-% php -dextension=xhprof.so foo.php
-</pre>
-
-<p><b>You should get an output like:</b>
-
-<pre>
-Array
-(
-    [foo==>bar] => Array
-        (
-            [ct] => 2         # 2 calls to bar() from foo()
-            [wt] => 27        # inclusive time in bar() when called from foo()
-        )
-
-    [foo==>strlen] => Array
-        (
-            [ct] => 2
-            [wt] => 2
-        )
-
-    [bar==>bar@1] => Array    # a recursive call to bar()
-        (
-            [ct] => 1
-            [wt] => 2
-        )
-
-    [main()==>foo] => Array
-        (
-            [ct] => 1
-            [wt] => 74
-        )
-
-    [main()==>xhprof_disable] => Array
-        (
-            [ct] => 1
-            [wt] => 0
-        )
-
-    [main()] => Array         # fake symbol representing root
-        (
-            [ct] => 1
-            [wt] => 83
-        )
-
-)
-</pre>
-
-<p><b>Note:</b> The raw data only contains "inclusive" metrics. For
-example, the wall time metric in the raw data represents inclusive
-time in microsecs.  Exclusive times for any function are computed
-during the analysis/reporting phase.
-
-<p><b>Note:</b> By default only call counts & elapsed time is profiled.
-You can optionally also profile CPU time and/or memory usage. Replace,
-
-<ul><pre>
-<b>xhprof_enable();</b>
-</pre></ul>
-in the above program with, for example:
-<ul><pre>
-<b>xhprof_enable(XHPROF_FLAGS_CPU + XHPROF_FLAGS_MEMORY)</b>;
-</pre></ul>
-
-<p><b>You should now get an output like:</b>
-
-<pre>
-Array
-(
-    [foo==>bar] => Array
-        (
-            [ct] => 2        # number of calls to bar() from foo()
-            [wt] => 37       # time in bar() when called from foo()
-            [cpu] => 0       # cpu time in bar() when called from foo()
-            [mu] => 2208     # change in PHP memory usage in bar() when called from foo()
-            [pmu] => 0       # change in PHP peak memory usage in bar() when called from foo()
-        )
-
-    [foo==>strlen] => Array
-        (
-            [ct] => 2
-            [wt] => 3
-            [cpu] => 0
-            [mu] => 624
-            [pmu] => 0
-        )
-
-    [bar==>bar@1] => Array
-        (
-            [ct] => 1
-            [wt] => 2
-            [cpu] => 0
-            [mu] => 856
-            [pmu] => 0
-        )
-
-    [main()==>foo] => Array
-        (
-            [ct] => 1
-            [wt] => 104
-            [cpu] => 0
-            [mu] => 4168
-            [pmu] => 0
-        )
-
-    [main()==>xhprof_disable] => Array
-        (
-            [ct] => 1
-            [wt] => 1
-            [cpu] => 0
-            [mu] => 344
-            [pmu] => 0
-        )
-
-    [main()] => Array
-        (
-            [ct] => 1
-            [wt] => 139
-            [cpu] => 0
-            [mu] => 5936
-            [pmu] => 0
-        )
-
-)
-</pre>
-
-<p><b>Skipping builtin functions during profiling</b>
-
-<p>By default PHP builtin functions (such as <code>strlen</code>) are
-profiled. If you do not want to profile builtin functions (to either
-reduce the overhead of profiling further or size of generated raw
-data), you can use the <code><b>XHPROF_FLAGS_NO_BUILTINS</b></code>
-flag as in for example:
-
-<ul><pre>
-// do not profile builtin functions
-<b>xhprof_enable(XHPROF_FLAGS_NO_BUILTINS)</b>;
-</pre></ul>
-
-
-<p><b>Ignoring specific functions during profiling (0.9.2 or higher)</b>
-
-<p>Starting with release 0.9.2 of xhprof, you can tell XHProf to
-ignore a specified list of functions during profiling. This allows you
-to ignore, for example, functions used for indirect function calls
-such as <code>call_user_func</code> and
-<code>call_user_func_array</code>. These intermediate functions
-unnecessarily complicate the call hierarchy and make the XHProf
-reports harder to interpret since they muddle the parent-child
-relationship for functions called indirectly.
-
-<p> To specify the list of functions to be ignored during profiling
-use the 2nd (optional) argument to <code>xhprof_enable</code>.
-For example,
-
-<pre>
-<ul><pre>
-<b>
-// elapsed time profiling; ignore call_user_func* during profiling
-xhprof_enable(0,
-             array('ignored_functions' =>  array('call_user_func',
-                                                 'call_user_func_array')));
-</b>
-or,
-<b>
-// elapsed time + memory profiling; ignore call_user_func* during profiling
-xhprof_enable(XHPROF_FLAGS_MEMORY,
-              array('ignored_functions' =>  array('call_user_func',
-                                                  'call_user_func_array')));
-</b>
-</pre></ul>
-
-
-</li>
-
-<li><a name="ui_setup"><h2>Setting up XHProf UI</h2></a>
-
-
-<ol>
-
-<li><b>PHP source structure</b>
-<p>The XHProf UI is implemented in PHP. The code resides in two
-subdirectories, <code>xhprof_html/</code> and <code>xhprof_lib/</code>.
-
-<p>The <code>xhprof_html</code> directory contains the 3 top-level PHP pages.
-
-<ul>
-<li><code>index.php</code>: For viewing a single run or diff report.
-<li><code>callgraph.php</code>: For viewing a callgraph of a XHProf run as an image.
-<li><code>typeahead.php</code>: Used implicitly for the function typeahead form
-on a XHProf report.
-</ul>
-
-<p>The <code>xhprof_lib</code> directory contains supporting code for
-display as well as analysis (computing flat profile info, computing
-diffs, aggregating data from multiple runs, etc.).
-
-<li><p><b>Web server config: </b> You'll need to make sure that the
-<code>xhprof_html/</code> directory is accessible from your web server, and that
-your web server is setup to serve PHP scripts.
-
-<li><p><b>Managing XHProf Runs</b>
-
-<p>Clients have flexibility in how they save the XHProf raw data
-obtained from an XHProf run. The XHProf UI layer exposes an interface
-iXHProfRuns (see xhprof_lib/utils/xhprof_runs.php) that clients can
-implement. This allows the clients to tell the UI layer how to fetch
-the data corresponding to a XHProf run.
-
-<p>The XHProf UI libaries come with a default file based
-implementation of the iXHProfRuns interface, namely
-"XHProfRuns_Default" (also in xhprof_lib/utils/xhprof_runs.php).
-This default implementation stores runs in the directory specified by
-<a href="#ini_file"><b>xhprof.output_dir</b></a> INI parameter.
-
-<p>A XHProf run must be uniquely identified by a namespace and a run
-id.
-
-
-
-<p><b>a) Saving XHProf data persistently</b>:
-
-<p>Assuming you are using the default implementation
-<code><b>XHProfRuns_Default</b></code> of the
-<code><b>iXHProfRuns</b></code> interface, a typical XHProf run
-followed by the save step might look something like:
-
-
-<pre>
-// start profiling
-xhprof_enable();
-
-// run program
-....
-
-// stop profiler
-$xhprof_data = xhprof_disable();
-
-//
-// Saving the XHProf run
-// using the default implementation of iXHProfRuns.
-//
-include_once $XHPROF_ROOT . "/xhprof_lib/utils/xhprof_lib.php";
-include_once $XHPROF_ROOT . "/xhprof_lib/utils/xhprof_runs.php";
-
-$xhprof_runs = new <b>XHProfRuns_Default()</b>;
-
-// Save the run under a namespace "xhprof_foo".
-//
-// **NOTE**:
-// By default save_run() will automatically generate a unique
-// run id for you. [You can override that behavior by passing
-// a run id (optional arg) to the save_run() method instead.]
-//
-<b>$run_id = $xhprof_runs->save_run($xhprof_data, "xhprof_foo");</b>
-
-echo "---------------\n".
-     "Assuming you have set up the http based UI for \n".
-     "XHProf at some address, you can view run at \n".
-     "http://&lt;xhprof-ui-address&gt;/index.php?run=$run_id&source=xhprof_foo\n".
-     "---------------\n";
-
-</pre>
-
-<p>The above should save the run as a file in the directory specified
-by the <code><b>xhprof.output_dir</b></code> INI parameter. The file's
-name might be something like
-<b><code>49bafaa3a3f66.xhprof_foo</code></b>; the two parts being the
-run id ("49bafaa3a3f66") and the namespace ("xhprof_foo"). [If you
-want to create/assign run ids yourself (such as a database sequence
-number, or a timestamp), you can explicitly pass in the run id to the
-<code>save_run</code> method.
-
-
-<p><b>b) Using your own implementation of iXHProfRuns</b>
-
-<p> If you decide you want your XHProf runs to be stored differently
-(either in a compressed format, in an alternate place such as DB,
-etc.)  database, you'll need to implement a class that implements the
-iXHProfRuns() interface.
-
-<p> You'll also need to modify the 3 main PHP entry pages (index.php,
-callgraph.php, typeahead.php) in the "xhprof_html/" directory to use
-the new class instead of the default class <code>XHProfRuns_Default</code>.
-Change this line in the 3 files.
-
-<pre>
-$xhprof_runs_impl = new XHProfRuns_Default();
-</pre>
-
-<p>You'll also need to "include" the file that implements your class in
-the above files.
-
-
-<li><p><b>Accessing runs from UI</b>
-
-<p><b>a) Viewing a Single Run Report</b>
-
-<p>To view the report for run id say &lt;run_id&gt; and namespace
-&lt;namespace&gt; use a URL of the form:
-
-<p><code>
-http://&lt;xhprof-ui-address&gt;/index.php?run=&lt;run_id&gt;&source=&lt;namespace&gt;
-</code>
-
-<p>For example,
-<p><code>
-http://&lt;xhprof-ui-address&gt;/index.php?run=49bafaa3a3f66&source=xhprof_foo
-</code>
-
-
-<p><b>b) Viewing a Diff Report</b>
-
-<p>To view the report for run ids say &lt;run_id1&gt; and
-&lt;run_id2&gt; in namespace &lt;namespace&gt; use a URL of the form:
-
-<p><code>
-http://&lt;xhprof-ui-address&gt;/index.php?<b>run1=&lt;run_id1&gt;&run2=&lt;run_id2&gt;</b>&source=&lt;namespace&gt;
-</code>
-
-<p><b>c) Aggregate Report</b>
-
-<p>You can also specify a set of run ids for which you want an aggregated view/report.
-
-<p>Say you have three XHProf runs with ids 1, 2 & 3 in namespace
-"benchmark".  To view an aggregate report of these runs:
-
-<ul><p><code>
-http://&lt;xhprof-ui-address&gt;/index.php?<b>run=1,2,3</b>&source=benchmark
-</code></p></ul>
-
-<p><b>Weighted aggregations</b>: Further suppose that the above three runs
-correspond to three types of programs p1.php, p2.php and p3.php that
-typically occur in a mix of 20%, 30%, 50% respectively. To view an
-aggregate report that corresponds to a weighted average of these runs
-using:
-
-<ul><p><code>
-http://&lt;xhprof-ui-address&gt;/index.php?<b>run=1,2,3&wts=20,30,50</b>&source=benchmark
-</code></p></ul>
-
-
-</ol>
-
-<li><a name="production_notes"><h2>Notes on using XHProf in production</h2></a>
-
-<p>Some observations/guidelines. Your mileage may vary:
-
-<ul>
-
-<li>CPU timer (getrusage) on Linux has high overheads. It is also
-coarse grained (millisec accuracy rather than microsec level) to be
-useful at function level. Therefore, the skew in reported numbers
-when using XHPROF_FLAGS_CPU mode tends to be higher.
-
-<p>We recommend using elapsed time + memory profiling mode in
-production. [Note: The additional overhead of memory profiling
-mode is really low.]
-
-<p><ul><pre><b>
-  // elapsed time profiling (default) + memory profiling
-  xhprof_enable(XHPROF_FLAGS_MEMORY);
-</b></pre>
-</ul></p>
-
-
-<li>Profiling a random sample of pages/requests works well in capturing
-data that is representative of your production workload.
-
-<p>To profile say 1/10000 of your requests, instrument the beginning of
-your request processing with something along the lines of:
-
-<p><ul><pre><code>
- if (mt_rand(1, 10000) == 1) {
-   xhprof_enable(XHPROF_FLAGS_MEMORY);
-   $xhprof_on = true;
- }
-</code></pre></ul></p>
-
-<p>At the end of the request (or in a request shutdown function), you might
-then do something like:
-
-<p><ul><pre><code>
- if ($xhprof_on) {
-   // stop profiler
-   $xhprof_data = xhprof_disable();
-
-   // save $xhprof_data somewhere (say a central DB)
-   ...
- }
-</code></pre></ul></p>
-
-<p> You can then rollup/aggregate these individual profiles by time
-(e.g., 5 minutely/hourly/daily basis), page/request type,or other
-dimensions using <a href="#xhprof_aggregate_runs"><code><b>xhprof_aggregate_runs()</b></code></a>.
-
-</ul>
-
-
-<li><a name="sampling_mode"><h2>Lightweight Sampling Mode</h2></a>
-
-<p>The xhprof extension also provides a very light weight <b>sampling
-mode</b>. The sampling interval is 0.1 secs. Samples record the full
-function call stack. The sampling mode can be useful if an extremely
-low overhead means of doing performance monitoring and diagnostics is
-desired.
-
-<p> The relevant functions exposed by the extension for using the
-sampling mode are <code><b>xhprof_sample_enable()</b></code> and
-<code><b>xhprof_sample_disable()</b></code>.
-
-
-<p>[<b>TBD</b>: more detailed documentation on sampling mode.]
-
-
-<li><a name="misc"><h2>Additional Features</h2></a></li>
-
-<p>The <code><b>xhprof_lib/utils/xhprof_lib.php</b></code> file contains
-additional library functions that can be used for manipulating/
-aggregating XHProf runs.
-
-<p>For example:
-
-<ul>
-
-<a name="xhprof_aggregate_runs"></a>
-<p><li><code><b>xhprof_aggregate_runs()</b></code>:
-can be used to aggregate multiple XHProf runs into a single run. This
-can be helpful for building a system-wide "function-level" performance
-monitoring tool using XHProf. [For example, you might to roll up
-XHProf runs sampled from production periodically to generate hourly,
-daily, reports.]
-
-<p><li><code><b>xhprof_prune_run()</b></code>: Aggregating large number of
-XHProf runs (especially if they correspond to different types of
-programs) can result in the callgraph size becoming too large. You can
-use <code>xhprof_prune_run</code> function to prune the callgraph data
-by editing out subtrees that account for a very small portion of the
-total time.
-
-</ul>
-
-
-<ol>
-
-</ol>
-
-<li><a name="dependencies"><h2>Dependencies</h2></a></li>
-
-<ul>
-<li><b>JQuery Javascript</b>: For tooltips and function name
-typeahead, we make use of JQuery's javascript libraries. JQuery is
-available under both a MIT and GPL licencse
-(http://docs.jquery.com/Licensing). The relevant JQuery code, used by
-XHProf, is in the <code>xhprof_html/jquery</code> subdirectory.
-
-<li><b>dot (image generation utility):</b> The callgraph image
-visualization ([View Callgraph]) feature relies on the presence of
-Graphviz "dot" utility in your path. "dot" is a utility to
-draw/generate an image for a directed graph.
-
-</ul>
-<li><a name="credits"><h2>Acknowledgements</h2></a>
-
-<p>The HTML-based navigational interface for browsing profiler results
-is inspired by that of a similar tool that exists for Oracle's stored
-procedure language, PL/SQL. But that's where the similarity ends; the
-internals of the profiler itself are quite different.
-
-</li>
-
-</ol>
+<div class="warn">Unknown <code>format</code> values fall back to JSON, and a run
+that cannot be loaded answers with HTTP 404 and a plain-text message.</div>
+
+<h2 id="typeahead">9. Typeahead (“jump to function…”)</h2>
+
+<p>The <b>jump to function…</b> box in the action list on every report page
+searches the functions of the report you are looking at: start typing a name,
+pick a suggestion, and the browser jumps to that function’s
+<a href="#parentchild">parent/child report</a>. On a diff report both runs are
+searched. The suggestion list holds at most 50 names, with an exact match
+first.</p>
+
+<h2 id="cli">10. Command line tools</h2>
+
+<p>Three helpers live in <code>bin/</code> for scripting and CI; all of them
+read runs from <code>xhprof.output_dir</code> (or <code>XHPROF_OUTPUT_DIR</code>)
+exactly like the web UI.</p>
+
+<p><b><code>bin/xhprofile &lt;script&gt;</code></b> — profiles a CLI script,
+saves the run and prints where to look at it:</p>
+
+<pre><code>$ bin/xhprofile examples/sample.php
+Saved run 6ac13608b7750 (5 entries)
+Report:      http://localhost:8080/index.php?run=6ac13608b7750&amp;source=xhprof
+Flame graph: http://localhost:8080/flamegraph.php?run=6ac13608b7750&amp;source=xhprof
+Export:      http://localhost:8080/report.php?run=6ac13608b7750&amp;source=xhprof&amp;format=json|csv|callgrind</code></pre>
+
+<p>The saved run’s source defaults to <code>xhprof</code>
+(<code>XHPROF_PROFILE_SOURCE</code> overrides it) and the printed links use
+<code>XHPROF_HTML_URL</code> (default <code>http://localhost/xhprof_html</code>)
+so they match wherever your UI is served.</p>
+
+<p><b><code>bin/xhprof-report &lt;run id&gt;</code></b> — the flat report on the
+terminal, using the same computation and the same sort order as the web page:</p>
+
+<pre><code>$ bin/xhprof-report --source=xhprof_foo --sort=wt --limit=5 &lt;run_id&gt;
+run: &lt;run_id&gt; (source: xhprof_foo)
+18 function(s), sorted by wt desc, top 5
+
+fn                                                                       ct             wt             mu            pmu
+main()                                                                    1          2,647        388,480        263,232
+render_report                                                             1          2,156         31,528         31,040
+score_row                                                               300          1,160         12,656          1,752
+normalize_tags                                                          300            994        105,696          1,504
+str_getcsv                                                              300            648        104,016            992
+TOTAL                                                                 3,906          2,647        388,480        263,232</code></pre>
+
+<p>Options: <code>-f/--file PATH</code> (read a saved run file instead of a run
+id), <code>--source NAME</code> (default <code>xhprof</code>),
+<code>--sort COL</code> (<code>wt</code> default, also <code>cpu</code>,
+<code>mu</code>, <code>pmu</code>, <code>ut</code>, <code>st</code>,
+<code>ct</code>, <code>fn</code> and the <code>excl_*</code> variants),
+<code>--limit N</code> (default 0 = all rows).</p>
+
+<p><b><code>bin/xhprof-diff &lt;old&gt; &lt;new&gt;</code></b> — the regression
+gate: it compares inclusive wall time (the same delta the web diff report shows)
+and exits non-zero when a function grew by more than the threshold, which makes
+it a drop-in CI check.</p>
+
+<pre><code>$ bin/xhprof-diff --source=xhprof_foo --threshold=20% --limit=5 &lt;old&gt; &lt;new&gt;
+total wt: 1,592 -&gt; 2,647 (+66.3%)
+
+6 of 20 function(s) with the biggest wt delta:
+
+fn                                                                   old wt         new wt          delta     change
+main()                                                                1,592          2,647          1,055     +66.3%
+render_report                                                         1,241          2,156            915     +73.7%
+str_getcsv                                                                0            648            648        new
+...
+
+6 function(s) over the 20% threshold:
+  build_index: 24 -&gt; 142 (+491.7%, 118)
+  ...
+
+REGRESSION</code></pre>
+
+<p><code>--threshold</code> is a percentage of the function’s own baseline
+(default 5%), <code>--limit</code> caps the listing (default 20), and
+<code>--source</code> names the namespace for run ids. Exit status:
+<code>0</code> nothing over the threshold, <code>1</code> at least one
+regression, <code>2</code> a usage or loading error. Two runs of identical code
+on a busy machine can still differ by tens of percent, so compare runs taken
+under the same conditions and pick a threshold above the run-to-run variance you
+see on your machine.</p>
+
+<h2 id="faq">11. Troubleshooting</h2>
+
+<table>
+<tr><th>Symptom</th><th>Cause / fix</th></tr>
+
+<tr><td>The run list is empty, or a save printed
+“Could not open &lt;path&gt;”</td>
+<td>The run directory is missing or not writable by the PHP user. Create
+<code>xhprof.output_dir</code> and make it writable (or set
+<code>XHPROF_OUTPUT_DIR</code>). Note that a failed save still hands out a run
+id, so watch the warning rather than the id.</td></tr>
+
+<tr><td>“Could not load XHProf run: Invalid Run Id = …”</td>
+<td>The file is not in the run directory, or the run id / source holds
+characters outside <code>[A-Za-z0-9_.-]</code> — those are rejected so a
+crafted id cannot escape the run directory.</td></tr>
+
+<tr><td>A large report is slow, blank, or dies with “Allowed memory size
+exhausted”</td>
+<td>Analysing a big run builds the whole report in memory; the README suggests
+<code>memory_limit</code> of at least 512&nbsp;MB for large runs.</td></tr>
+
+<tr><td>The callgraph page shows “failed to execute cmd”</td>
+<td>Graphviz’s <code>dot</code> is not installed or not on the web server’s
+<code>PATH</code>. Install graphviz (the README’s Docker image already has
+it).</td></tr>
+
+<tr><td>PHP warnings or notices appear above a report or a callgraph
+image</td>
+<td>PHP diagnostics are being printed into the response. Turn
+<code>display_errors</code> off for the web server; the reports themselves are
+unaffected.</td></tr>
+
+<tr><td>“profiling is disabled (xhprof.profiler=0)”</td>
+<td>The extension is loaded with <code>xhprof.profiler=0</code>, which
+deliberately registers no observer: <code>xhprof_enable()</code> and
+<code>xhprof_sample_enable()</code> return <code>false</code> with a warning
+instead of silently producing nothing. Remove the setting on hosts that profile
+at runtime; keep it where the extension must stay loaded but never
+profiles.</td></tr>
+
+<tr><td>A report shows zeros where numbers are expected</td>
+<td>Malformed run data (non-numeric metric values) is sanitized to 0 instead of
+failing the page, so a corrupted run still renders — treat zeros as “no data”
+for that function.</td></tr>
+</table>
+
+<h2 id="credits">Acknowledgements</h2>
+
+<p>XHProf was originally developed at Facebook and open sourced in March 2009;
+the HTML-based navigational interface for browsing profiler results was inspired
+by a similar tool for Oracle’s PL/SQL. The code is licensed under the Apache
+License 2.0.</p>
+
+<p>This page was rewritten for the current UI; the French translation
+(<a href="index-fr.html">index-fr.html</a>) still follows the older draft and may
+lag behind.</p>
 
 </body>
 </html>
