@@ -41,10 +41,10 @@
   <active>yes</active>
  </lead>
  <date>2026-10-04</date>
- <time>02:20:00</time>
+ <time>02:45:00</time>
  <version>
-  <release>2.3.14</release>
-  <api>2.3.14</api>
+  <release>2.3.15</release>
+  <api>2.3.15</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,25 +52,13 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - Sampling runs are fully supported end to end: folded stacks are
-      folded into the report model on read, the flame graph renders them
-      as an exact "Sampled flame graph (exact)" view, and the new
-      report.php?format=folded export emits folded stacks directly.
-    - Report-layer hardening: PHP 8.5 null-offset deprecations fixed;
-      self-loop and missing-metric data no longer emit warnings; mixed
-      metric runs diff and aggregate cleanly.
-    - bin/xhprof-diff gains --relative (regression measured as share of
-      the run total, immune to machine speed drift); bad ?threshold values
-      fall back to the default on flamegraph and callgraph; callgraph SVGs
-      render on a transparent background.
-    - The bundled jQuery 1.2.6 stack (4.6k lines) is gone: the report page
-      uses native JavaScript (tooltip and typeahead behavior verified
-      identical); reports support dark mode via prefers-color-scheme.
-    - CI: gcov coverage job, weekly valgrind job, the Windows job is no
-      longer non-blocking; a new release workflow attaches the tarball to
-      GitHub releases on tags. New report-layer test suite (140 checks).
-    - Docs: XHGui recipe fixed for PHP 8 (upload/file savers), PECL channel
-      note, sampled-run documentation and dual-mode flame graph docs.
+    - Fix CSV exports (report.php?format=csv) on PHP 7.2 and 7.3: the
+      empty-string escape argument passed to fputcsv() is only supported
+      since PHP 7.4; older versions reject it and produced an empty
+      download. Older versions now use the classic backslash escape.
+    - Verified on a real php:7.2-cli container: CSV output byte-identical
+      to 8.5 and the report-layer suite passes 135/135 there.
+    - Everything else is identical to 2.3.14.
  </notes>
  <contents>
   <dir name="/">
@@ -170,6 +158,23 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-04</date>
+      <version>
+       <release>2.3.15</release>
+       <api>2.3.15</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - Fix CSV exports on PHP 7.2/7.3 (empty-string escape argument to
+         fputcsv() needs PHP 7.4+; older versions produced empty
+         downloads). Everything else identical to 2.3.14.
+      </notes>
+   </release>
+
    <release>
       <date>2026-10-04</date>
       <version>
