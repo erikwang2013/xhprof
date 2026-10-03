@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t d">
+  <title id="t">Xhpy — xhprof 项目宠物（火焰精灵）</title>
+  <desc id="d">一只橙红渐变的火焰小精灵：圆滚滚的火焰身体代表性能热点（火焰图），大眼睛笑脸，是 xhprof 的项目宠物。</desc>
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFC94F"/>
+      <stop offset=".55" stop-color="#FF9438"/>
+      <stop offset="1" stop-color="#F04E2A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 地面阴影 -->
+  <ellipse cx="256" cy="442" rx="118" ry="14" fill="#5C2A16" opacity=".12"/>
+
+  <!-- 小火星 -->
+  <circle cx="138" cy="198" r="5" fill="#FFC94F"/>
+  <circle cx="392" cy="240" r="4" fill="#FF8F3C"/>
+
+  <!-- 小脚 -->
+  <ellipse cx="212" cy="428" rx="19" ry="11.5" fill="#F2502C"/>
+  <ellipse cx="300" cy="428" rx="19" ry="11.5" fill="#F2502C"/>
+
+  <!-- 小短手（举起） -->
+  <path d="M136 338 C 122 330 112 318 108 306" fill="none" stroke="#F2502C" stroke-width="15" stroke-linecap="round"/>
+  <path d="M376 338 C 390 330 400 318 404 306" fill="none" stroke="#F2502C" stroke-width="15" stroke-linecap="round"/>
+
+  <!-- 火焰身体 -->
+  <path d="M252 78 C 228 128 168 166 148 240 C 132 300 130 344 150 380 C 172 448 340 448 362 380 C 382 344 380 300 364 242 C 342 168 284 132 268 104 C 262 90 258 82 252 78 Z" fill="url(#body)"/>
+
+  <!-- 脸 -->
+  <ellipse cx="216" cy="300" rx="15" ry="19" fill="#4A1D0D"/>
+  <circle cx="210" cy="291" r="5.8" fill="#fff"/>
+  <circle cx="221" cy="308" r="2.6" fill="#fff" opacity=".8"/>
+  <ellipse cx="296" cy="300" rx="15" ry="19" fill="#4A1D0D"/>
+  <circle cx="290" cy="291" r="5.8" fill="#fff"/>
+  <circle cx="301" cy="308" r="2.6" fill="#fff" opacity=".8"/>
+  <ellipse cx="184" cy="340" rx="20" ry="11" fill="#F693A6" opacity=".9"/>
+  <ellipse cx="328" cy="340" rx="20" ry="11" fill="#F693A6" opacity=".9"/>
+  <path d="M244 334 Q 256 346 268 334" fill="none" stroke="#4A1D0D" stroke-width="5" stroke-linecap="round"/>
+</svg>

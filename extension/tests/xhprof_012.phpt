@@ -15,8 +15,11 @@ $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, "https://www.php.net/");
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 curl_exec($ch);
-curl_close($ch);
+@curl_close($ch); /* deprecated since PHP 8.5, the "@" keeps the notice out of the output */
 $output = xhprof_disable();
+/* PHP 8.5+ constructs a Deprecated object for the notice suppressed above;
+ * it is not part of what this test checks (the curl_exec trace name) */
+unset($output['main()==>Deprecated::__construct']);
 print_canonical($output);
 echo "\n";
 

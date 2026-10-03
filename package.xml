@@ -40,11 +40,11 @@
   <email>longxinhui@php.net</email>
   <active>yes</active>
  </lead>
- <date>2024-07-11</date>
- <time>10:19:00</time>
+ <date>2026-10-03</date>
+ <time>22:00:00</time>
  <version>
-  <release>2.3.10</release>
-  <api>2.3.10</api>
+  <release>2.3.11</release>
+  <api>2.3.11</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,12 +52,26 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - Fix build for 8.4 and pcre2 by @andypost in #86
-    - Fix for PHP 8.4 by @remicollet in #87
+    - Security: fix XSS via URL parameters and report data; fix path
+      traversal and PHP object injection in the web UI.
+    - Crash fixes: SIGSEGV with non-array xhprof_enable() options,
+      ignored_functions "main()", and SQL/curl trace callbacks; SIGFPE
+      with xhprof.sampling_interval=0; recursion counter drift fixed.
+    - Robustness: malformed run data no longer returns HTTP 500.
+    - Verified on PHP 8.3, 8.4, 8.5 and 8.6 (RC2); add tests xhprof_014~018.
+    - CI moved to GitHub Actions; bilingual README; packaging refresh.
  </notes>
  <contents>
   <dir name="/">
    <file name="examples/sample.php" role="doc" />
+   <file name="bin/xhprofile" role="script" />
+   <file name="scripts/xhprofile.php" role="script" />
+   <file name="resource/pecl.png" role="doc" />
+   <file name="resource/xhpy.svg" role="doc" />
+   <file name="resource/xhpy-wink.svg" role="doc" />
+   <file name="resource/xhpy-surprised.svg" role="doc" />
+   <file name="resource/xhpy-blink.svg" role="doc" />
+   <file name="travis/run-test.sh" role="test" />
    <file name="extension/tests/common.php" role="test" />
    <file name="extension/tests/xhprof_001.phpt" role="test" />
    <file name="extension/tests/xhprof_002.phpt" role="test" />
@@ -76,6 +90,11 @@
    <file name="extension/tests/xhprof_011_prepend.php" role="test" />
    <file name="extension/tests/xhprof_012.phpt" role="test" />
    <file name="extension/tests/xhprof_013.phpt" role="test" />
+   <file name="extension/tests/xhprof_014.phpt" role="test" />
+   <file name="extension/tests/xhprof_015.phpt" role="test" />
+   <file name="extension/tests/xhprof_016.phpt" role="test" />
+   <file name="extension/tests/xhprof_017.phpt" role="test" />
+   <file name="extension/tests/xhprof_018.phpt" role="test" />
    <file name="extension/config.m4" role="src" />
    <file name="extension/config.w32" role="src" />
    <file name="extension/php_xhprof.h" role="src" />
@@ -83,6 +102,7 @@
    <file name="extension/xhprof.c" role="src" />
    <file name="xhprof_html/css/xhprof.css" role="php" />
    <file name="xhprof_html/docs/index.html" role="doc" />
+   <file name="xhprof_html/docs/index-fr.html" role="doc" />
    <file name="xhprof_html/docs/sample-callgraph-image.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-diff-report-flat-view.jpg" role="doc" />
    <file name="xhprof_html/docs/sample-diff-report-parent-child-view.jpg" role="doc" />
@@ -95,6 +115,9 @@
    <file name="xhprof_html/jquery/jquery.tooltip.css" role="php" />
    <file name="xhprof_html/jquery/jquery.tooltip.js" role="php" />
    <file name="xhprof_html/js/xhprof_report.js" role="php" />
+   <file name="xhprof_html/xhpy.svg" role="php" />
+   <file name="xhprof_html/xhpy-blink.svg" role="php" />
+   <file name="xhprof_html/xhpy-surprised.svg" role="php" />
    <file name="xhprof_html/callgraph.php" role="php" />
    <file name="xhprof_html/index.php" role="php" />
    <file name="xhprof_html/typeahead.php" role="php" />
@@ -106,6 +129,7 @@
    <file name="CHANGELOG" role="doc" />
    <file name="CREDITS" role="doc" />
    <file name="README.md" role="doc" />
+   <file name="README.zh-CN.md" role="doc" />
    <file name="LICENSE" role="doc" />
   </dir>
  </contents>
@@ -122,6 +146,28 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-03</date>
+      <version>
+       <release>2.3.11</release>
+       <api>2.3.11</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - Security: fix XSS via URL parameters and report data; fix path
+         traversal and PHP object injection in the web UI.
+       - Crash fixes: SIGSEGV with non-array xhprof_enable() options,
+         ignored_functions "main()", and SQL/curl trace callbacks; SIGFPE
+         with xhprof.sampling_interval=0; recursion counter drift fixed.
+       - Robustness: malformed run data no longer returns HTTP 500.
+       - Verified on PHP 8.3, 8.4, 8.5 and 8.6 (RC2); add tests xhprof_014~018.
+       - CI moved to GitHub Actions; bilingual README; packaging refresh.
+      </notes>
+   </release>
+
    <release>
       <date>2024-07-11</date>
       <version>

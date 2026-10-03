@@ -636,6 +636,17 @@ $.Autocompleter.Select = function (options, input, select, config) {
 			: available;
 	}
 	
+	// Escape text that comes from the server (or from local data) before it
+	// is inserted into the document. "<" is what can introduce markup at an
+	// HTML sink; "&" is deliberately left alone because the typeahead
+	// endpoint already sends entity encoded output (htmlspecialchars) and
+	// escaping it a second time would double encode the displayed text.
+	// The <strong> highlight markup is inserted by options.highlight()
+	// *after* this escaping, so it is preserved.
+	function escapeHtmlText(value) {
+		return String(value).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	}
+
 	function fillList() {
 		list.empty();
 		var max = limitNumberOfItems(data.length);
@@ -645,7 +656,7 @@ $.Autocompleter.Select = function (options, input, select, config) {
 			var formatted = options.formatItem(data[i].data, i+1, max, data[i].value, term);
 			if ( formatted === false )
 				continue;
-			var li = $("<li/>").html( options.highlight(formatted, term) ).addClass(i%2 == 0 ? "ac_even" : "ac_odd").appendTo(list)[0];
+			var li = $("<li/>").html( options.highlight(escapeHtmlText(formatted), term) ).addClass(i%2 == 0 ? "ac_even" : "ac_odd").appendTo(list)[0];
 			$.data(li, "ac_data", data[i]);
 		}
 		listItems = list.find("li");

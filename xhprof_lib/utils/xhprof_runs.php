@@ -76,10 +76,37 @@ class XHProfRuns_Default implements iXHProfRuns {
 
   private function file_name($run_id, $type) {
 
+    // Both parameters become part of the run's file name: restrict them
+    // to a safe character set and reject ".." so they can not traverse
+    // out of the run directory or refer to another path.
+    foreach (array($run_id, $type) as $part) {
+      if (!is_string($part) || !preg_match('/^[A-Za-z0-9_.-]+$/', $part)
+          || strpos($part, '..') !== false) {
+        xhprof_error("Invalid run id or type");
+        return null;
+      }
+    }
+
     $file = "$run_id.$type." . $this->suffix;
 
     if (!empty($this->dir)) {
       $file = $this->dir . "/" . $file;
+
+      // Defense in depth: make sure the resulting path really stays inside
+      // the configured run directory.
+      $real_dir = realpath($this->dir);
+      if ($real_dir !== false) {
+        $real_file = realpath($file);
+        if ($real_file === false) {
+          // the file does not exist yet (save_run): resolve it manually
+          $real_file = $real_dir . DIRECTORY_SEPARATOR . basename($file);
+        }
+        $prefix = rtrim($real_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        if (strncmp($real_file, $prefix, strlen($prefix)) !== 0) {
+          xhprof_error("Invalid run id or type (path escapes run directory)");
+          return null;
+        }
+      }
     }
     return $file;
   }
@@ -108,7 +135,20 @@ class XHProfRuns_Default implements iXHProfRuns {
   }
 
   public function get_run($run_id, $type, &$run_desc) {
+    // memoize runs already read during this request (e.g. the typeahead
+    // endpoint can ask for the same run more than once).
+    static $cached_runs = array();
+
     $file_name = $this->file_name($run_id, $type);
+    if ($file_name === null) {
+      $run_desc = "Invalid Run Id = " . (is_scalar($run_id) ? $run_id : '');
+      return null;
+    }
+
+    if (isset($cached_runs[$file_name])) {
+      $run_desc = $cached_runs[$file_name]['desc'];
+      return $cached_runs[$file_name]['data'];
+    }
 
     if (!file_exists($file_name)) {
       xhprof_error("Could not find file $file_name");
@@ -117,21 +157,45 @@ class XHProfRuns_Default implements iXHProfRuns {
     }
 
     $contents = file_get_contents($file_name);
+    if ($contents === false) {
+      xhprof_error("Could not read file $file_name");
+      $run_desc = "Invalid Run Id = $run_id";
+      return null;
+    }
+
+    // Run files hold plain data: never instantiate objects while
+    // unserializing them.
+    $raw_data = unserialize($contents, array('allowed_classes' => false));
+    if (!is_array($raw_data)) {
+      xhprof_error("Could not unserialize file $file_name");
+      $run_desc = "Invalid Run Id = $run_id";
+      return null;
+    }
+
+    // metric values are used in arithmetic all over the report code:
+    // degrade anything that is not a number instead of blowing up later.
+    $raw_data = xhprof_sanitize_run_data($raw_data);
+
     $run_desc = "XHProf Run (Namespace=$type)";
-    return unserialize($contents);
+    $cached_runs[$file_name] = array('desc' => $run_desc, 'data' => $raw_data);
+    return $raw_data;
   }
 
   public function save_run($xhprof_data, $type, $run_id = null) {
-
-    // Use PHP serialize function to store the XHProf's
-    // raw profiler data.
-    $xhprof_data = serialize($xhprof_data);
 
     if ($run_id === null) {
       $run_id = $this->gen_run_id($type);
     }
 
     $file_name = $this->file_name($run_id, $type);
+    if ($file_name === null) {
+      return null;
+    }
+
+    // Use PHP serialize function to store the XHProf's
+    // raw profiler data.
+    $xhprof_data = serialize($xhprof_data);
+
     $file = fopen($file_name, 'w');
 
     if ($file) {

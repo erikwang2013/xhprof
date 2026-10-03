@@ -388,18 +388,19 @@ function sort_cbk($a, $b) {
   if ($sort_col == "fn") {
 
     // case insensitive ascending sort for function names
-    $left = strtoupper($a["fn"]);
-    $right = strtoupper($b["fn"]);
+    $cmp = strcasecmp($a["fn"], $b["fn"]);
 
-    if ($left == $right)
+    if ($cmp == 0)
       return 0;
-    return ($left < $right) ? -1 : 1;
+    return ($cmp < 0) ? -1 : 1;
 
   } else {
 
     // descending sort for all others
-    $left = $a[$sort_col];
-    $right = $b[$sort_col];
+    // ($sort_col may be missing from some rows, e.g. metrics absent from C++
+    // profiler runs: treat those as 0)
+    $left = $a[$sort_col] ?? 0;
+    $right = $b[$sort_col] ?? 0;
 
     // if diff mode, sort by absolute value of regression/improvement
     if ($diff_mode) {
@@ -476,8 +477,11 @@ function profiler_report ($url_params,
     $symbol_tab = xhprof_compute_flat_info($run1_data, $totals);
   }
 
+  // run ids and descriptions can embed user supplied data (aggregation
+  // weights, for instance): escape them, this text is emitted as HTML.
   $run1_txt = sprintf("<b>Run #%s:</b> %s",
-                      $run1, $run1_desc);
+                      htmlspecialchars((string)$run1),
+                      htmlspecialchars((string)$run1_desc));
 
   $base_url_params = xhprof_array_unset(xhprof_array_unset($url_params,
                                                            'symbol'),
@@ -489,15 +493,16 @@ function profiler_report ($url_params,
     $diff_text = "Diff";
     $base_url_params = xhprof_array_unset($base_url_params, 'run1');
     $base_url_params = xhprof_array_unset($base_url_params, 'run2');
-    $run1_link = xhprof_render_link('View Run #' . $run1,
+    $run1_link = xhprof_render_link('View Run #' . htmlspecialchars($run1),
                            "$base_url?" .
                            http_build_query(xhprof_array_set($base_url_params,
                                                       'run',
                                                       $run1)));
     $run2_txt = sprintf("<b>Run #%s:</b> %s",
-                        $run2, $run2_desc);
+                        htmlspecialchars((string)$run2),
+                        htmlspecialchars((string)$run2_desc));
 
-    $run2_link = xhprof_render_link('View Run #' . $run2,
+    $run2_link = xhprof_render_link('View Run #' . htmlspecialchars($run2),
                                     "$base_url?" .
                         http_build_query(xhprof_array_set($base_url_params,
                                                           'run',
@@ -546,7 +551,8 @@ function profiler_report ($url_params,
   // data tables
   if (!empty($rep_symbol)) {
     if (!isset($symbol_tab[$rep_symbol])) {
-      echo "<hr>Symbol <b>$rep_symbol</b> not found in XHProf run</b><hr>";
+      echo "<hr>Symbol <b>" . htmlspecialchars($rep_symbol)
+           . "</b> not found in XHProf run</b><hr>";
       return;
     }
 
@@ -678,7 +684,7 @@ function print_function_info($url_params, $info, $sort, $run1, $run2) {
                                              'symbol', $info["fn"]));
 
   print('<td>');
-  print(xhprof_render_link($info["fn"], $href));
+  print(xhprof_render_link(htmlspecialchars($info["fn"]), $href));
   print_source_link($info);
   print("</td>\n");
 
@@ -813,8 +819,10 @@ function full_report($url_params, $symbol_tab, $sort, $run1, $run2) {
           .'rules=rows bordercolor="#bdc7d8" align=center>' . "\n");
     print('<tr bgcolor="#bdc7d8" align=right>');
     print("<th></th>");
-    print("<th $vwbar>" . xhprof_render_link("Run #$run1", $href1) . "</th>");
-    print("<th $vwbar>" . xhprof_render_link("Run #$run2", $href2) . "</th>");
+    print("<th $vwbar>" . xhprof_render_link("Run #" . htmlspecialchars($run1),
+                                             $href1) . "</th>");
+    print("<th $vwbar>" . xhprof_render_link("Run #" . htmlspecialchars($run2),
+                                             $href2) . "</th>");
     print("<th $vwbar>Diff</th>");
     print("<th $vwbar>Diff%</th>");
     print('</tr>');
@@ -995,7 +1003,7 @@ function print_pc_array($url_params, $results, $base_ct, $base_info, $parent,
       print('<tr bgcolor="#e5e5e5">');
     }
 
-    print("<td>" . xhprof_render_link($info["fn"], $href));
+    print("<td>" . xhprof_render_link(htmlspecialchars($info["fn"]), $href));
     print_source_link($info);
     print("</td>");
     pc_info($info, $base_ct, $base_info, $parent);
@@ -1075,13 +1083,16 @@ function symbol_report($url_params,
     $href2 = "$base_url?"
       . http_build_query(xhprof_array_set($base_url_params, 'run', $run2));
 
-    print("<h3 align=center>$regr_impr summary for $rep_symbol<br><br></h3>");
+    print("<h3 align=center>$regr_impr summary for "
+          . htmlspecialchars($rep_symbol) . "<br><br></h3>");
     print('<table border=1 cellpadding=2 cellspacing=1 width="30%" '
           .'rules=rows bordercolor="#bdc7d8" align=center>' . "\n");
     print('<tr bgcolor="#bdc7d8" align=right>');
-    print("<th align=left>$rep_symbol</th>");
-    print("<th $vwbar><a href=" . $href1 . ">Run #$run1</a></th>");
-    print("<th $vwbar><a href=" . $href2 . ">Run #$run2</a></th>");
+    print("<th align=left>" . htmlspecialchars($rep_symbol) . "</th>");
+    print("<th $vwbar><a href=" . $href1 . ">Run #"
+          . htmlspecialchars($run1) . "</a></th>");
+    print("<th $vwbar><a href=" . $href2 . ">Run #"
+          . htmlspecialchars($run2) . "</a></th>");
     print("<th $vwbar>Diff</th>");
     print("<th $vwbar>Diff%</th>");
     print('</tr>');
@@ -1143,7 +1154,8 @@ function symbol_report($url_params,
   }
 
   print("<br><h4><center>");
-  print("Parent/Child $regr_impr report for <b>$rep_symbol</b>");
+  print("Parent/Child $regr_impr report for <b>"
+        . htmlspecialchars($rep_symbol) . "</b>");
 
   $callgraph_href = "$base_path/callgraph.php?"
     . http_build_query(xhprof_array_set($url_params, 'func', $rep_symbol));
@@ -1180,7 +1192,7 @@ function symbol_report($url_params,
 
   print("<tr>");
   // make this a self-reference to facilitate copy-pasting snippets to e-mails
-  print("<td><a href=''>$rep_symbol</a>");
+  print("<td><a href=''>" . htmlspecialchars($rep_symbol) . "</a>");
   print_source_link(array('fn' => $rep_symbol));
   print("</td>");
 
@@ -1270,7 +1282,9 @@ function symbol_report($url_params,
   // Related javascript code is in: xhprof_report.js
   print("\n");
   print('<script language="javascript">' . "\n");
-  print("var func_name = '\"" . $rep_symbol . "\"';\n");
+  print("var func_name = " .
+        json_encode('"' . $rep_symbol . '"',
+                    JSON_INVALID_UTF8_SUBSTITUTE) . ";\n");
   print("var total_child_ct  = " . $base_ct . ";\n");
   if ($display_calls) {
     print("var func_ct   = " . $symbol_info["ct"] . ";\n");
@@ -1408,8 +1422,20 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
                                     $runs_array, $wts_array, $source, false);
       $xhprof_data = $data['raw'];
       $description = $data['description'];
+      if (!empty($data['bad_runs'])) {
+        $description .= " (skipped invalid runs: "
+                      . implode(", ", $data['bad_runs']) . ")";
+      }
     }
 
+    // A missing or corrupt run comes back as null (or as "Invalid input.."
+    // for a bad aggregation): report it instead of feeding null into the
+    // report code below.
+    if (!is_array($xhprof_data)) {
+      echo "<hr>Could not load XHProf run: "
+           . htmlspecialchars((string)$description) . "<hr>";
+      return;
+    }
 
     profiler_single_run_report($url_params,
                                $xhprof_data,
@@ -1422,6 +1448,13 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
 
     $xhprof_data1 = $xhprof_runs_impl->get_run($run1, $source, $description1);
     $xhprof_data2 = $xhprof_runs_impl->get_run($run2, $source, $description2);
+
+    if (!is_array($xhprof_data1) || !is_array($xhprof_data2)) {
+      echo "<hr>Could not load XHProf run: "
+           . htmlspecialchars((string)$description1 . " " . (string)$description2)
+           . "<hr>";
+      return;
+    }
 
     profiler_diff_report($url_params,
                          $xhprof_data1,

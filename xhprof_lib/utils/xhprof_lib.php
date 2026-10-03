@@ -64,7 +64,7 @@ function init_metrics($xhprof_data, $rep_symbol, $sort, $diff_report = false) {
     if (array_key_exists($sort, $sortable_columns)) {
       $sort_col = $sort;
     } else {
-      print("Invalid Sort Key $sort specified in URL");
+      print("Invalid Sort Key " . htmlspecialchars($sort) . " specified in URL");
     }
   }
 
@@ -223,6 +223,52 @@ function xhprof_valid_run($run_id, $raw_data) {
 
 
 /**
+ * Normalize the shape of a raw XHProf run before it is used.
+ *
+ * Run files are plain data: a corrupted or hand crafted one can carry
+ * strings (or arrays) where the reporting code expects numbers, which
+ * then blows up in the middle of the arithmetic. Non numeric metric
+ * values are degraded to 0, and entries that are not arrays at all are
+ * dropped.
+ *
+ * @param  array  $raw_data  XHProf raw data
+ *
+ * @return array  Sanitized XHProf raw data
+ */
+function xhprof_sanitize_run_data($raw_data) {
+
+  if (!is_array($raw_data)) {
+    return $raw_data;
+  }
+
+  // the metrics main() carries are the ones the report looks up on
+  // every entry.
+  $metrics = array();
+  if (isset($raw_data["main()"]) && is_array($raw_data["main()"])) {
+    $metrics = array_keys($raw_data["main()"]);
+  }
+
+  foreach ($raw_data as $parent_child => $info) {
+    if (!is_array($info)) {
+      unset($raw_data[$parent_child]);
+      continue;
+    }
+    foreach ($info as $metric => $value) {
+      if (!is_numeric($value)) {
+        $raw_data[$parent_child][$metric] = 0;
+      }
+    }
+    foreach ($metrics as $metric) {
+      if (!isset($raw_data[$parent_child][$metric])) {
+        $raw_data[$parent_child][$metric] = 0;
+      }
+    }
+  }
+
+  return $raw_data;
+}
+
+/**
  * Return a trimmed version of the XHProf raw data. Note that the raw
  * data contains one entry for each unique parent/child function
  * combination.The trimmed version of raw data will only contain
@@ -336,13 +382,27 @@ function xhprof_aggregate_runs($xhprof_runs_impl, $runs,
                  'raw'  => null);
   }
 
+  // weights take part in the aggregation arithmetic and are echoed back in
+  // the report description: they must be numeric.
+  foreach ($wts as $wt) {
+    if (!is_numeric($wt)) {
+      return array('description' => 'Invalid input..',
+                   'raw'  => null);
+    }
+  }
+
   $bad_runs = array();
   foreach ($runs as $idx => $run_id) {
 
     $raw_data = $xhprof_runs_impl->get_run($run_id, $source, $description);
 
-    // use the first run to derive what metrics to aggregate on.
-    if ($idx == 0) {
+    if (!is_array($raw_data) || !xhprof_valid_run($run_id, $raw_data)) {
+      $bad_runs[] = $run_id;
+      continue;
+    }
+
+    // use the first valid run to derive what metrics to aggregate on.
+    if (empty($metrics)) {
       foreach ($raw_data["main()"] as $metric => $val) {
         if ($metric != "pmu") {
           // for now, just to keep data size small, skip "peak" memory usage
@@ -353,11 +413,6 @@ function xhprof_aggregate_runs($xhprof_runs_impl, $runs,
           }
         }
       }
-    }
-
-    if (!xhprof_valid_run($run_id, $raw_data)) {
-      $bad_runs[] = $run_id;
-      continue;
     }
 
     if ($use_script_name) {
@@ -748,6 +803,12 @@ function xhprof_get_param_helper($param) {
   else if (isset($_POST[$param])) {
     $val = $_POST[$param];
   }
+  // Query string params may arrive as arrays (e.g. "?sort[]=x"). Only
+  // scalar values are meaningful here: treat anything else as unspecified
+  // so the string helpers below don't blow up on array input.
+  if ($val !== null && !is_string($val)) {
+    return null;
+  }
   return $val;
 }
 
@@ -909,6 +970,11 @@ function xhprof_param_init($params) {
 
     if ($k === 'run') {
       $p = implode(',', array_filter(explode(',', $p), 'ctype_xdigit'));
+    }
+
+    if ($k === 'run1' || $k === 'run2') {
+      // these are single run ids (unlike "run", no comma separated list)
+      $p = ctype_xdigit($p) ? $p : '';
     }
 
     if ($k == 'symbol') {

@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  linux:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php: [ '7.2', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5', '8.6' ]
+        experimental: [ false ]
+        include:
+          # 8.6 尚未 GA（当前为 RC/预览期，本地以 8.6.0RC2 验证通过）。
+          # setup-php 拉取的是预发布构建，可能随上游变动而失败，故不阻塞 CI；
+          # 8.6 GA 后收紧：删除此 include 块（并移除上面的 continue-on-error）。
+          - php: '8.6'
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Build
+        working-directory: extension
+        run: |
+          phpize
+          ./configure
+          make -j"$(nproc)"
+
+      - name: Test
+        working-directory: extension
+        env:
+          TEST_PHP_ARGS: "-q"
+          REPORT_EXIT_STATUS: "1"
+        run: make test
+
+  # 待首次运行验证：Windows 构建使用 php-sdk + devel pack（与 .appveyor.yml 相同流程），
+  # 因为 setup-php 在 Windows 上只安装预编译 PHP、不提供 phpize/编译工具链。
+  # 首次运行通过后可移除 continue-on-error（功能测试仍由 AppVeyor 覆盖）。
+  windows:
+    name: Windows (PHP 8.4 NTS)
+    runs-on: windows-latest
+    continue-on-error: true
+    env:
+      SDK_VER: '2.3.0'
+      PHP_VER: '8.4.26'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download php-sdk and devel pack
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://github.com/php/php-sdk-binary-tools/archive/php-sdk-$env:SDK_VER.zip" -OutFile sdk.zip
+          7z x sdk.zip -o. | Out-Null
+          $zip = "php-devel-pack-$env:PHP_VER-nts-Win32-vs17-x64.zip"
+          Invoke-WebRequest "https://downloads.php.net/~windows/releases/archives/$zip" -OutFile $zip
+          7z x $zip -o. | Out-Null
+          $devel = "php-$env:PHP_VER-devel-vs17-x64"
+          Add-Content -Path task.bat -Value @(
+            '@echo off',
+            "set PATH=$pwd\$devel;%PATH%",
+            "cd /d $($pwd.Path)\extension",
+            'call phpize',
+            'call configure --enable-xhprof',
+            'nmake /nologo',
+            'exit %errorlevel%'
+          )
+
+      - name: Build extension
+        shell: pwsh
+        run: |
+          & "$pwd\php-sdk-binary-tools-php-sdk-$env:SDK_VER\phpsdk-vs17-x64.bat" -t "$pwd\task.bat"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem extension -Recurse -Filter php_xhprof.dll | Select-Object FullName

@@ -74,6 +74,7 @@ function xhprof_generate_mime_header($type, $length) {
       break;
     case 'ps':
       $mime = 'application/postscript';
+      break;
     default:
       $mime = false;
   }
@@ -255,7 +256,10 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
   // performance bottleneck).
   $cur_id = 0; $max_wt = 0;
   foreach ($sym_table as $symbol => $info) {
-    if (empty($func) && abs($info["wt"] / $totals["wt"]) < $threshold) {
+    // a zero total (empty or crafted run) has no ratio to compare against.
+    if (empty($func) &&
+        (empty($totals["wt"]) ||
+         abs($info["wt"] / $totals["wt"]) < $threshold)) {
       unset($sym_table[$symbol]);
       continue;
     }
@@ -298,13 +302,17 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
       $name .= addslashes(isset($page) ? $page : $symbol);
     } else {
       $shape = "box";
+      $pct_inc = empty($totals["wt"]) ? "0.0%"
+                 : sprintf("%.1f%%", 100 * $info["wt"] / $totals["wt"]);
       $name = addslashes($symbol)."\\nInc: ". sprintf("%.3f",$info["wt"] / 1000) .
-              " ms (" . sprintf("%.1f%%", 100 * $info["wt"] / $totals["wt"]).")";
+              " ms (" . $pct_inc . ")";
     }
     if ($left === null) {
+      $pct_excl = empty($totals["wt"]) ? "0.0%"
+                  : sprintf("%.1f%%", 100 * $info["excl_wt"] / $totals["wt"]);
       $label = ", label=\"".$name."\\nExcl: "
                .(sprintf("%.3f",$info["excl_wt"] / 1000.0))." ms ("
-               .sprintf("%.1f%%", 100 * $info["excl_wt"] / $totals["wt"])
+               .$pct_excl
                . ")\\n".$info["ct"]." total calls\"";
     } else {
       if (isset($left[$symbol]) && isset($right[$symbol])) {
@@ -362,10 +370,12 @@ function xhprof_generate_dot_script($raw_data, $threshold, $source, $page,
                                     / $sym_table[$child]["wt"])
                   : "0.0%";
 
-      $taillabel = ($sym_table[$parent]["wt"] > 0) ?
-        sprintf("%.1f%%",
-                100 * $info["wt"] /
-                ($sym_table[$parent]["wt"] - $sym_table["$parent"]["excl_wt"]))
+      // parent's time spent in its children; can be zero when the child
+      // edge carries no time, in which case there is no ratio to report.
+      $parent_self_wt = $sym_table[$parent]["wt"]
+                        - $sym_table[$parent]["excl_wt"];
+      $taillabel = ($sym_table[$parent]["wt"] > 0 && $parent_self_wt != 0) ?
+        sprintf("%.1f%%", 100 * $info["wt"] / $parent_self_wt)
         : "0.0%";
 
       $linewidth = 1;
@@ -398,6 +408,13 @@ function  xhprof_render_diff_image($xhprof_runs_impl, $run1, $run2,
 
   $raw_data1 = $xhprof_runs_impl->get_run($run1, $source, $desc_unused);
   $raw_data2 = $xhprof_runs_impl->get_run($run2, $source, $desc_unused);
+
+  if (!is_array($raw_data1) || !is_array($raw_data2)) {
+    xhprof_error("Raw data is empty");
+    print "Error: either we can not find profile data for run_id "
+          . $run1 . " or " . $run2 . ".";
+    exit();
+  }
 
   // init_metrics($raw_data1, null, null);
   $children_table1 = xhprof_get_children_table($raw_data1);

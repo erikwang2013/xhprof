@@ -23,6 +23,9 @@
 
 // by default assume that xhprof_html & xhprof_lib directories
 // are at the same level.
+// the typeahead endpoint returns newline separated function names as plain text
+header('Content-Type: text/plain; charset=UTF-8');
+
 $GLOBALS['XHPROF_LIB_ROOT'] = dirname(__FILE__) . '/../xhprof_lib';
 
 require_once $GLOBALS['XHPROF_LIB_ROOT'].'/display/xhprof.php';

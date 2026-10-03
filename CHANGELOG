@@ -7,6 +7,33 @@ Modification History:
   Please edit package.xml instead.
  ************
 
+ Unreleased   security fixes, crash fixes, robustness fixes, test additions
+              and behavior changes
+              for the next release (release notes move to package.xml).
+              - Security: fix XSS via URL parameters and report data; fix path
+                traversal and PHP object injection via unserialize in custom
+                run id handling.
+              - Crash fixes: SIGSEGV with a non-array second argument to
+                xhprof_enable(), with ignored_functions containing "main()",
+                and with SQL callbacks; SIGFPE with
+                xhprof.sampling_interval=0.
+              - Robustness: reports no longer return HTTP 500 on malformed
+                run data (non-numeric metric values are sanitized to 0,
+                non-array entries dropped); division-by-zero guards added
+                in callgraph generation.
+              - Tests: add xhprof_014 ~ xhprof_018.
+              - PHP 8.6 compatibility: builds cleanly and passes the full test
+                suite against 8.6.0RC2 (no source changes required); PHP 8.5
+                still builds and passes the same suite.
+              - Behavior changes:
+                (1). xhprof_enable() now throws a TypeError when the second
+                     argument is not an array (previously a segmentation
+                     fault).
+                (2). More than 256 ignored_functions entries are truncated
+                     with a warning.
+                (3). The charset allowed for custom run ids/types is narrowed
+                     to [A-Za-z0-9_.-].
+
  03/02/2008   kannan, checkin xhprof_html/ and xhprof_lib/ directories.
               cjiang  [These contain PHP sources for the UI as well
                       as various supporting libraries to compute

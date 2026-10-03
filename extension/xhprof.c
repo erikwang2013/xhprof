@@ -163,7 +163,9 @@ PHP_FUNCTION(xhprof_enable)
     zend_long xhprof_flags = 0;              /* XHProf flags */
     zval *optional_array = NULL;         /* optional array arg: for future use */
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "|lz", &xhprof_flags, &optional_array) == FAILURE) {
+    /* "a!" accepts an array or null; anything else fails with a TypeError
+     * instead of crashing in hp_get_ignored_functions_from_arg() */
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "|la!", &xhprof_flags, &optional_array) == FAILURE) {
         return;
     }
 
@@ -376,7 +378,7 @@ static void hp_register_constants(INIT_FUNC_ARGS)
  */
 void hp_get_ignored_functions_from_arg(zval *args)
 {
-    if (args == NULL) {
+    if (args == NULL || Z_TYPE_P(args) != IS_ARRAY) {
         return;
     }
 
@@ -427,6 +429,7 @@ hp_ignored_functions *hp_ignored_functions_init(zval *values)
         HashTable *ht;
         zend_string *key;
         zval *val;
+        int truncated = 0;
 
         ht = Z_ARRVAL_P(values);
         count = zend_hash_num_elements(ht);
@@ -437,6 +440,16 @@ hp_ignored_functions *hp_ignored_functions_init(zval *values)
             if (!key) {
                 if (Z_TYPE_P(val) == IS_STRING && strcmp(Z_STRVAL_P(val), ROOT_SYMBOL) != 0) {
                     /* do not ignore "main" */
+                    if (ix >= XHPROF_MAX_IGNORED_FUNCTIONS) {
+                        /* names[] is only freed up to XHPROF_MAX_IGNORED_FUNCTIONS
+                         * entries, so stop storing (and warn once) instead of
+                         * leaking everything past the limit */
+                        if (!truncated) {
+                            php_error_docref(NULL, E_WARNING, "ignored_functions is limited to %d entries; extra entries are ignored", XHPROF_MAX_IGNORED_FUNCTIONS);
+                            truncated = 1;
+                        }
+                        continue;
+                    }
                     names[ix] = zend_string_init(Z_STRVAL_P(val), Z_STRLEN_P(val), 0);
                     ix++;
                 }
@@ -444,8 +457,11 @@ hp_ignored_functions *hp_ignored_functions_init(zval *values)
         } ZEND_HASH_FOREACH_END();
     } else if (Z_TYPE_P(values) == IS_STRING) {
         names = ecalloc(2, sizeof(zend_string *));
-        names[0] = zend_string_init(Z_STRVAL_P(values), Z_STRLEN_P(values), 0);
-        ix = 1;
+        if (strcmp(Z_STRVAL_P(values), ROOT_SYMBOL) != 0) {
+            /* do not ignore "main" */
+            names[0] = zend_string_init(Z_STRVAL_P(values), Z_STRLEN_P(values), 0);
+            ix = 1;
+        }
     } else {
         return NULL;
     }
@@ -849,6 +865,13 @@ void hp_mode_dummy_endfn_cb(hp_entry_t **entries)
  */
 void hp_mode_sampled_init_cb()
 {
+    /* The clamp in php_xhprof_init_globals() happens before REGISTER_INI_ENTRIES(),
+     * so re-apply it here: a zero (or negative) interval would divide by zero in
+     * hp_trunc_time() and spin forever in hp_sample_check() */
+    if (XHPROF_G(sampling_interval) < XHPROF_MINIMAL_SAMPLING_INTERVAL) {
+        XHPROF_G(sampling_interval) = XHPROF_MINIMAL_SAMPLING_INTERVAL;
+    }
+
     /* Init the last_sample in tsc */
     XHPROF_G(last_sample_tsc) = cycle_timer();
 
@@ -924,7 +947,8 @@ void hp_mode_hier_endfn_cb(hp_entry_t **entries)
 
 #if PHP_VERSION_ID >= 80000
     if (top->is_trace == 0) {
-        XHPROF_G(func_hash_counters[top->hash_code])--;
+        /* Dummy entries pushed for ignored functions never incremented the
+         * counter in hp_mode_common_beginfn(), so do not decrement here */
         return;
     }
 #endif
@@ -1276,7 +1300,7 @@ static inline void hp_array_del(zend_string **names)
     }
 }
 
-int hp_pcre_match(zend_string *pattern, const char *str, size_t len, zend_ulong idx)
+int hp_pcre_match(zend_string *pattern, const char *str, size_t len)
 {
     pcre_cache_entry *pce_regexp;
 
@@ -1341,14 +1365,25 @@ zend_string *hp_pcre_replace(zend_string *pattern, zend_string *repl, zval *data
 zend_string *hp_trace_callback_sql_query(zend_string *function_name, zend_execute_data *data)
 {
     zend_string *trace_name;
+    uint32_t arg_num = 1;
+    zval *arg;
 
     if (strcmp(ZSTR_VAL(function_name), "mysqli_query") == 0) {
-        zval *arg = ZEND_CALL_ARG(data, 2);
-        trace_name = strpprintf(0, "%s#%s", ZSTR_VAL(function_name), Z_STRVAL_P(arg));
-    } else {
-        zval *arg = ZEND_CALL_ARG(data, 1);
-        trace_name = strpprintf(0, "%s#%s", ZSTR_VAL(function_name), Z_STRVAL_P(arg));
+        arg_num = 2;
     }
+
+    if (ZEND_CALL_NUM_ARGS(data) < arg_num) {
+        trace_name = strpprintf(0, "%s", ZSTR_VAL(function_name));
+        return trace_name;
+    }
+
+    arg = ZEND_CALL_ARG(data, arg_num);
+    if (Z_TYPE_P(arg) != IS_STRING) {
+        trace_name = strpprintf(0, "%s", ZSTR_VAL(function_name));
+        return trace_name;
+    }
+
+    trace_name = strpprintf(0, "%s#%s", ZSTR_VAL(function_name), Z_STRVAL_P(arg));
 
     return trace_name;
 }
@@ -1397,7 +1432,7 @@ zend_string *hp_trace_callback_pdo_statement_execute(zend_string *symbol, zend_e
         }
 
         if (pattern) {
-            if (hp_pcre_match(pattern, ZSTR_VAL(repl), ZSTR_LEN(repl), 0)) {
+            if (hp_pcre_match(pattern, ZSTR_VAL(repl), ZSTR_LEN(repl))) {
                 zval *val;
                 zend_string *replace;
 
@@ -1435,20 +1470,35 @@ zend_string *hp_trace_callback_curl_exec(zend_string *symbol, zend_execute_data 
 {
     zend_string *result;
     zval func, retval, *option;
-    zval *arg = ZEND_CALL_ARG(data, 1);
+    zval *arg;
+
+    if (ZEND_CALL_NUM_ARGS(data) < 1) {
+        result = strpprintf(0, "%s", ZSTR_VAL(symbol));
+        return result;
+    }
+
+    arg = ZEND_CALL_ARG(data, 1);
 
 #if PHP_VERSION_ID < 80000
-    if (arg == NULL || Z_TYPE_P(arg) != IS_RESOURCE) {
+    if (Z_TYPE_P(arg) != IS_RESOURCE) {
 #else
-    if (arg == NULL || Z_TYPE_P(arg) != IS_OBJECT) {
+    if (Z_TYPE_P(arg) != IS_OBJECT) {
 #endif
         result = strpprintf(0, "%s", ZSTR_VAL(symbol));
+        return result;
+    }
+
+    /* curl_getinfo() may be unavailable (e.g. listed in disable_functions);
+     * skip the auxiliary call so we don't raise an error in profiled code */
+    if (!zend_hash_str_exists(EG(function_table), "curl_getinfo", sizeof("curl_getinfo") - 1)) {
+        result = strpprintf(0, "%s#%s", ZSTR_VAL(symbol), "unknown");
         return result;
     }
 
     zval params[1];
     ZVAL_COPY(&params[0], arg);
     ZVAL_STRING(&func, "curl_getinfo");
+    ZVAL_UNDEF(&retval);
 
     zend_fcall_info fci = {
             sizeof(fci),
@@ -1471,8 +1521,14 @@ zend_string *hp_trace_callback_curl_exec(zend_string *symbol, zend_execute_data 
     if (zend_call_function(&fci, NULL) == FAILURE) {
         result = strpprintf(0, "%s#%s", ZSTR_VAL(symbol), "unknown");
     } else {
-        option = zend_hash_str_find(Z_ARRVAL(retval), "url", sizeof("url") - 1);
-        result = strpprintf(0, "%s#%s", ZSTR_VAL(symbol), Z_STRVAL_P(option));
+        option = (Z_TYPE(retval) == IS_ARRAY)
+                 ? zend_hash_str_find(Z_ARRVAL(retval), "url", sizeof("url") - 1) : NULL;
+
+        if (option == NULL || Z_TYPE_P(option) != IS_STRING || Z_STRLEN_P(option) == 0) {
+            result = strpprintf(0, "%s#%s", ZSTR_VAL(symbol), "unknown");
+        } else {
+            result = strpprintf(0, "%s#%s", ZSTR_VAL(symbol), Z_STRVAL_P(option));
+        }
     }
 
     zval_ptr_dtor(&func);

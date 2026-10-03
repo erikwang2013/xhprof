@@ -1,5 +1,8 @@
 # xhprof for PHP7 and PHP8
-[![Build Status](https://travis-ci.com/longxinH/xhprof.svg?branch=master)](https://app.travis-ci.com/github/longxinH/xhprof) [![Build status](https://ci.appveyor.com/api/projects/status/dornfeel5yutaxte/branch/master?svg=true)](https://ci.appveyor.com/project/longxinH/xhprof/branch/master)
+**[English](README.md) | [简体中文](README.zh-CN.md)**
+[![CI](https://github.com/longxinH/xhprof/actions/workflows/ci.yml/badge.svg)](https://github.com/longxinH/xhprof/actions/workflows/ci.yml) [![Build status](https://ci.appveyor.com/api/projects/status/dornfeel5yutaxte/branch/master?svg=true)](https://ci.appveyor.com/project/longxinH/xhprof/branch/master)
+
+<img src="resource/xhpy-blink.svg" alt="Xhpy — the xhprof mascot" width="140" align="right">
 
 XHProf is a function-level hierarchical profiler for PHP and has a simple HTML based navigational interface. The raw data collection component is implemented in C (as a PHP extension). The reporting/UI layer is all in PHP. It is capable of reporting function-level inclusive and exclusive wall times, memory usage, CPU times and number of calls for each function. Additionally, it supports ability to compare two runs (hierarchical DIFF reports), or aggregate results from multiple runs.
 
@@ -7,13 +10,23 @@ This version supports PHP7 and PHP8
 
 # PHP Version
 - 7.2
-- 7.3
 - 7.4
 - 8.0
 - 8.1
 - 8.2
+- 8.3
+- 8.4
+- 8.5
+- 8.6 (pre-release; builds and passes the full test suite against 8.6.0RC2)
 
 # Installation
+
+## Install via PECL
+```sh
+pecl install xhprof
+```
+
+## Build from source
 ```
 git clone https://github.com/longxinH/xhprof.git ./xhprof
 cd xhprof/extension/
@@ -54,13 +67,23 @@ Example
 ```php
 <?php
 
-array(
-    "main()" => array(
-        "wt" => 237,
-        "ct" => 1,
-        "cpu" => 100,
-    )
-)
+// start profiling
+xhprof_enable(XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY);
+
+// ... the code you want to profile ...
+
+// stop profiling and fetch the raw data
+$xhprof_data = xhprof_disable();
+
+// $xhprof_data is keyed by "caller==>callee", for example:
+// array(
+//     "main()" => array(
+//         "wt" => 237,
+//         "ct" => 1,
+//         "cpu" => 100,
+//     )
+// )
+print_r($xhprof_data);
 ```
 
 - `wt` The execution time of the function method is time consuming
@@ -109,6 +132,10 @@ curl_close($ch);
 ```
 curl_exec#http://www.baidu.com
 ```
+
+# Notes
+- Loading the xhprof extension in php.ini adds roughly 2x function-call overhead, even if profiling is never enabled (`xhprof_enable()` is never called). It is not recommended to load it permanently on production systems that do not profile.
+- Analyzing large run reports requires `memory_limit >= 512M`.
 
 ## PECL Repository
 [![pecl](resource/pecl.png)](https://pecl.php.net/package/xhprof)

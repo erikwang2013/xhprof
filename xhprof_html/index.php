@@ -68,10 +68,17 @@ foreach ($params as $k => $v) {
 echo "<html>";
 
 echo "<head><title>XHProf: Hierarchical Profiler Report</title>";
+echo '<link rel="icon" type="image/svg+xml" href="xhpy.svg">';
 xhprof_include_js_css();
 echo "</head>";
 
 echo "<body>";
+
+// Xhpy, the xhprof project mascot (SVG sources kept in resource/).
+// Blinks while a run is selected; surprised when there is nothing to show yet.
+$xhpy_face = ($run !== '' || ($run1 !== '' && $run2 !== '')) ? 'xhpy-blink.svg' : 'xhpy-surprised.svg';
+echo '<div style="text-align:right"><img src="' . $xhpy_face . '" width="72" height="72"'
+   . ' alt="Xhpy - the xhprof mascot" title="Xhpy, the xhprof mascot"></div>';
 
 $vbar  = ' class="vbar"';
 $vwbar = ' class="vwbar"';

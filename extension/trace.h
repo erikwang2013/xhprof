@@ -161,14 +161,18 @@ static zend_always_inline int begin_profiling(zend_string *root_symbol, zend_exe
         (*(entries)) = (cur_entry);
     } else {
 #if PHP_VERSION_ID >= 80000
-        hp_entry_t *cur_entry = hp_fast_alloc_hprof_entry();
-        (cur_entry)->name_hprof = zend_string_copy((*(entries))->name_hprof);
-        (cur_entry)->prev_hprof = (*(entries));
-        (cur_entry)->is_trace = 0;
-        (cur_entry)->hash_code = (*(entries))->hash_code;
-        (cur_entry)->rlvl_hprof = 0;
-        (*(entries)) = (cur_entry);
-        profile_curr = 1;
+        /* A dummy entry mirrors the current top of the stack; without a stack
+         * (e.g. "main()" itself being ignored) there is nothing to mirror */
+        if (*(entries) != NULL) {
+            hp_entry_t *cur_entry = hp_fast_alloc_hprof_entry();
+            (cur_entry)->name_hprof = zend_string_copy((*(entries))->name_hprof);
+            (cur_entry)->prev_hprof = (*(entries));
+            (cur_entry)->is_trace = 0;
+            (cur_entry)->hash_code = (*(entries))->hash_code;
+            (cur_entry)->rlvl_hprof = 0;
+            (*(entries)) = (cur_entry);
+            profile_curr = 1;
+        }
 #endif
         zend_string_release(function_name);
     }

@@ -5,11 +5,30 @@ extension/*
 !extension/tests/
 !extension/xhprof.c
 
-extension/tests/*.sh
+# run-tests 产物；测试夹具（*.php/*.phpt/*.sh）不再忽略
 extension/tests/*.exp
 extension/tests/*.out
 extension/tests/*.diff
 extension/tests/*.log
-extension/tests/*.php
+!extension/tests/*.php
 
 support/libxhprof/.phutil_module_cache
+
+# Ruflo local secrets and runtime data
+.env
+.env.local
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+
+# Codex local configuration
+.codex/
+# Claude Flow runtime data
+# Environment variables
+.claude
+.agents
+.swarm
+.mcp.json
+ruvector.db
+target/

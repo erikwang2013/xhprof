@@ -42,16 +42,19 @@ if (!empty($run)) {
 
   // single run mode
   $raw_data = $xhprof_runs_impl->get_run($run, $source, $desc_unused);
-  $functions = xhprof_get_matching_functions($q, $raw_data);
+  $functions = is_array($raw_data) ?
+    xhprof_get_matching_functions($q, $raw_data) : array();
 
 } else if (!empty($run1) && !empty($run2)) {
 
   // diff mode
   $raw_data = $xhprof_runs_impl->get_run($run1, $source, $desc_unused);
-  $functions1 = xhprof_get_matching_functions($q, $raw_data);
+  $functions1 = is_array($raw_data) ?
+    xhprof_get_matching_functions($q, $raw_data) : array();
 
   $raw_data = $xhprof_runs_impl->get_run($run2, $source, $desc_unused);
-  $functions2 = xhprof_get_matching_functions($q, $raw_data);
+  $functions2 = is_array($raw_data) ?
+    xhprof_get_matching_functions($q, $raw_data) : array();
 
 
   $functions = array_unique(array_merge($functions1, $functions2));
@@ -75,5 +78,7 @@ if (in_array($q, $functions)) {
 }
 
 foreach ($functions as $f) {
-  echo $f."\n";
+  // one function name per line, escaped: the autocomplete widget renders
+  // these strings as HTML on the client side.
+  echo htmlspecialchars($f)."\n";
 }
