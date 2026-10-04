@@ -85,7 +85,7 @@
       ZEND_LONG_MAX/2 ceiling), invalid UTF-8 source paths survive
       (ENT_SUBSTITUTE), recursive self-costs keep their file mapping.
     - Tests: xhprof_027 (metrics batch), xhprof_028 (memory sampling),
-      xhprof_029 (cross-feature acceptance); report-layer suite 193
+      xhprof_029 (cross-feature acceptance); report-layer suite 225
       checks. Extension suite 29/29 on PHP 8.5, run end-to-end a second
       time on the fully integrated tree.
     - Everything else is identical to 2.3.16.
@@ -211,7 +211,7 @@
          sampling mode (xhprof.sampling_memory_interval), file/Redis
          trace callbacks. New timeline view, callgrind file mapping
          (fl=/cfl=) and XHPROF_EDITOR_URL editor links. 29/29 extension
-         tests, 193 report-layer checks on PHP 8.5. Everything else
+         tests, 225 report-layer checks on PHP 8.5. Everything else
          identical to 2.3.16.
       </notes>
    </release>
