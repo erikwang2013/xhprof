@@ -6,7 +6,7 @@
 
 XHProf is a function-level hierarchical profiler for PHP. The raw data collection component is implemented in C (as a PHP extension); the reporting/UI layer is all in PHP. It reports function-level inclusive and exclusive wall times, memory usage, CPU times and the number of calls for each function, and can compare two runs (hierarchical DIFF reports) or aggregate results from multiple runs.
 
-Around that core this repository ships a complete toolchain: a web UI with a run list and one-click compare (flat, parent-child, DIFF and aggregate reports), a callgraph and a flame graph view (*approximate* for hierarchical runs, exact for sampled ones); callgrind, JSON, CSV and folded-stack exports; CLI tools (`bin/xhprofile`, `bin/xhprof-report`, and `bin/xhprof-diff` as a CI regression gate); a one-command Docker demo; and the `xhprof.profiler=0` gate that keeps the extension loaded at roughly the cost of not loading it. Supported on PHP 7.2 through 8.6.
+Around that core this repository ships a complete toolchain: a web UI with a run list and one-click compare (flat, parent-child, DIFF and aggregate reports), a callgraph and a flame graph view (*approximate* for hierarchical runs, exact for sampled ones), plus a timeline view; callgrind, JSON, CSV and folded-stack exports; CLI tools (`bin/xhprofile`, `bin/xhprof-report`, and `bin/xhprof-diff` as a CI regression gate); a one-command Docker demo; and the `xhprof.profiler=0` gate that keeps the extension loaded at roughly the cost of not loading it. Supported on PHP 7.2 through 8.6.
 
 # Why xhprof
 - **Nothing leaves your machine.** Profiles are written to your `xhprof.output_dir` and stay there — no service, no upload, no telemetry.
@@ -17,7 +17,7 @@ Around that core this repository ships a complete toolchain: a web UI with a run
 
 <p align="center"><img src="resource/xhprof-architecture.svg" alt="XHProf architecture: PHP runtime, C extension, data contract and storage, reporting layer" width="900"></p>
 
-Four layers, top to bottom. Userland PHP runs on the Zend Engine, where `xhprof.so` attaches its observer hooks to function calls; the extension pairs callers with callees — recursive calls become `foo@n` — accumulates `wt`, `ct`, `cpu`, `mu` and `pmu`, and can sample instead of tracing every call. `xhprof_disable()` hands the flat `"caller==>callee"` array back to PHP, `save_run()` serializes it into `xhprof.output_dir`, and the reporting layer rebuilds the call hierarchy from it. Set `xhprof.profiler=0` and none of those hooks are registered at all.
+Four layers, top to bottom. Userland PHP runs on the Zend Engine, where `xhprof.so` attaches its observer hooks to function calls; the extension pairs callers with callees — recursive calls become `foo@n` — accumulates `wt`, `ct`, `cpu`, `mu` and `pmu` (`ut`/`st`/`minflt`/`majflt` with `XHPROF_FLAGS_CPU_SPLIT`), and can sample instead of tracing every call. `xhprof_disable()` hands the flat `"caller==>callee"` array back to PHP, `save_run()` serializes it into `xhprof.output_dir`, and the reporting layer rebuilds the call hierarchy from it. Set `xhprof.profiler=0` and none of those hooks are registered at all.
 
 # Design
 
@@ -127,6 +127,9 @@ xhprof.output_dir = /tmp/xhprof
 |xhprof.sampling_depth  | INT_MAX | >= v2.* | Depth to trace call-chain by the sampling profiler|
 |xhprof.collect_additional_info  | 0 | >= v2.1 | Collect mysql_query, curl_exec internal info. The default is 0. Open value is 1|
 |xhprof.collect_files  | 0 | >= v2.3.16 | Record the file and declaration line of every profiled user function (internals get none). With 1 the run file carries a `"__files__"` map: the report shows `file:line` next to each function name and `format=json` exports it under `"files"`. Costs one hash lookup per profiled call (~30ns, about a tenth of the profiler's own overhead) and ~100 bytes per function in the run file|
+|xhprof.collect_callsites  | 0 | >= v2.3.17 | Record the call site (`file:line`) for each `caller==>callee` pair, taken at the pair's first call. The parent-child view shows it next to the caller; `format=json` exports it under `"callsites"`. Deep recursion levels share the first call's annotation, and `foo@2` variants resolve to the base pair|
+|xhprof.collect_timeline  | 0 | >= v2.3.17 | Record each function's first and last call start time (µs since profiling started). `format=json` exports it under `"timeline"` (data only for now, no HTML view yet)|
+|xhprof.sampling_memory_interval  | 0 | >= v2.3.17 | Sampling mode only (bytes, 0 = off). In addition to the time-interval samples, take a stack sample whenever heap usage has grown past this many bytes since the last memory sample. Samples fold, export and flame-graph exactly like time samples; the sampling point is the first call boundary after the threshold is crossed, so allocations inside one call are attributed to that call. Values below 4KB are clamped up; turning the setting on mid-run can produce one immediate sample|
 |xhprof.profiler  | 1 | >= v2.3.12 | System (php.ini / `-d` only). Set to 0 to load the extension without registering any observer/proxy: idle overhead drops back to non-extension levels, but `xhprof_enable()` / `xhprof_sample_enable()` then return false with an `E_WARNING`|
 |xhprof.auto_enable  | 0 | >= v2.3.12 | System. Start hierarchical profiling at request start without calling `xhprof_enable()` (requires `xhprof.profiler=1`; silently inert when it is 0)|
 |xhprof.auto_enable_flags  | 0 | >= v2.3.12 | System. Flags used by `xhprof.auto_enable`, e.g. `XHPROF_FLAGS_CPU \| XHPROF_FLAGS_MEMORY`|
@@ -143,6 +146,7 @@ xhprof_enable(XHPROF_FLAGS_NO_BUILTINS | XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY)
 - `XHPROF_FLAGS_NO_BUILTINS` do not profile builtins
 - `XHPROF_FLAGS_CPU` gather CPU times for funcs
 - `XHPROF_FLAGS_MEMORY` gather memory usage for funcs
+- `XHPROF_FLAGS_CPU_SPLIT` gather user (`ut`) and system (`st`) CPU time separately, plus minor/major page faults (`minflt`/`majflt`), instead of the merged `cpu` time
 
 Example
 ```php
@@ -170,8 +174,14 @@ print_r($xhprof_data);
 - `wt` The execution time of the function method is time consuming
 - `ct` The number of times the function was called
 - `cpu` The CPU time consumed by the function method execution
+- `ut` / `st` User / system CPU time, with `XHPROF_FLAGS_CPU_SPLIT` (replaces the merged `cpu`)
+- `minflt` / `majflt` Minor / major page faults, with `XHPROF_FLAGS_CPU_SPLIT`
 - `mu` Memory used by function methods. The call is zend_memory_usage to get the memory usage
 - `pmu` Peak memory used by the function method. The call is zend_memory_peak_usage to get the memory
+
+`load::<file>` entries (includes/requires) are worth reading too: their `wt` is the compile time of that file, and the entry exists only when the file was really compiled — a file served from opcache short-circuits before the compile hook, so opcache hits have no `load::` entry at all.
+
+One engine-side effect to keep in mind when reading profiles (PHP 8.4/8.5 with OPcache, the production default): the optimizer deletes calls whose result is unused when the callee is pure (e.g. `function f() { return 1; }`), so such calls legitimately never appear in the profile — give a function a side effect if it must show up. (JIT is not covered by the test suites.)
 
 ### PDO::exec
 ### PDO::query
@@ -214,15 +224,49 @@ curl_close($ch);
 curl_exec#http://www.baidu.com
 ```
 
+### File functions
+```php
+$config = file_get_contents("/etc/myapp/config.ini");
+$fh = fopen("/var/log/myapp.log", "a");
+```
+##### Output data
+```
+file_get_contents#/etc/myapp/config.ini
+fopen#/var/log/myapp.log
+```
+`file_put_contents` is recorded the same way.
+
+### Redis
+`Redis::get`, `set`, `del`, `expire`, `incr`, `hget`, `hgetall`, `lpush`, `rpush`, `sadd` and `smembers` are recorded with their key argument:
+```php
+$user = $redis->get("user:42");
+```
+##### Output data
+```
+Redis::get#user:42
+```
+
 # Data export and visualization
 
 Besides the HTML report, a run can leave the browser:
 
 - **Flame graph** — `xhprof_html/flamegraph.php` renders a flame graph for a run, and the page says which kind you are looking at. A **hierarchical run is the approximate view** (banner: *Approximate*): xhprof stores aggregated `caller==>callee` edges, not individual call frames, so each function's inclusive metric is apportioned over its outgoing calls by each edge's share, and the remainder becomes its self time — frame widths are sound, the split below an aggregated edge is an estimate. A **sampling-mode run is exact** (banner: *Sampled flame graph (exact)*): every sample is one whole call stack, so a frame's width is the exact number of samples that carried it and a path exists only when a sample really took it. Frames narrower than `?threshold=<0..1>` of the run (default 0.01) are folded into an `(others)` frame.
-- **Callgrind** — export a run in callgrind format and open it in [KCachegrind](https://apps.kde.org/kcachegrind/) or QCachegrind for source/callee-level analysis.
+- **Callgrind** — export a run in callgrind format and open it in [KCachegrind](https://apps.kde.org/kcachegrind/) or QCachegrind for source/callee-level analysis. When the run carries the file map (`xhprof.collect_files=1`), the export includes `fl=`/`cfl=` entries, so KCachegrind associates each function with its source file.
+- **Timeline** — `xhprof_html/timeline.php` (linked from the report page when the run has timeline data) shows when each function was first and last called: one bar per function, from its first call's start to its last call's start — that is a window, not continuous execution — relative to the profiling start. Collected with `xhprof.collect_timeline=1`.
 - **JSON / CSV** — machine-readable exports of the flat report, for scripts, dashboards or your own diffing.
 
 Every export is linked from the report page (**Export**: Flame Graph (approximate) | JSON | CSV | callgrind) — the flame-graph link keeps the *approximate* label, but a sampled run opens the exact view. Direct URLs look like `report.php?format=json`, `report.php?format=csv` and `report.php?format=callgrind`; `report.php?format=folded` (sampling-mode runs only) writes one `frame;frame;... <sample count>` line per distinct stack for standard flame-graph tooling, and answers 400 for a run that was not sampled.
+
+## Jump to source from the report
+
+With the file map collected (`xhprof.collect_files=1`), `file:line` annotations appear next to function names and call sites. Define an editor URL template before the UI runs and they become clickable (`%s` = path, `%d` = line):
+
+```php
+define('XHPROF_EDITOR_URL', 'vscode://file%s:%d');
+// also common:
+// define('XHPROF_EDITOR_URL', 'phpstorm://open?file=%s&line=%d');
+// define('XHPROF_EDITOR_URL', 'subl://open?url=file://%s&line=%d');
+```
 
 # XHGui recipe
 

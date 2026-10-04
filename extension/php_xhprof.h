@@ -43,7 +43,7 @@ extern zend_module_entry xhprof_module_entry;
  */
 
 /* XHProf version                           */
-#define XHPROF_VERSION       "2.3.16"
+#define XHPROF_VERSION       "2.3.17"
 
 #define XHPROF_FUNC_HASH_COUNTERS_SIZE   1024
 
@@ -68,10 +68,18 @@ extern zend_module_entry xhprof_module_entry;
 #define XHPROF_FLAGS_NO_BUILTINS   0x0001         /* do not profile builtins */
 #define XHPROF_FLAGS_CPU           0x0002      /* gather CPU times for funcs */
 #define XHPROF_FLAGS_MEMORY        0x0004   /* gather memory usage for funcs */
+/* Split CPU into user/system CPU time and page fault counts (ut, st,
+ * minflt, majflt). Supersedes XHPROF_FLAGS_CPU: the merged "cpu" is not
+ * recorded. Costs a getrusage() pair per call instead of the plain flag's
+ * clock reads - measured +2.74us per call against +2.14us for the plain
+ * CPU flag; the two clocks themselves are the same order (~1.15us vs
+ * ~1.2us per read). */
+#define XHPROF_FLAGS_CPU_SPLIT     0x0008
 
 /* Constants for XHPROF_MODE_SAMPLED        */
 #define XHPROF_DEFAULT_SAMPLING_INTERVAL       100000      /* In microsecs        */
 #define XHPROF_MINIMAL_SAMPLING_INTERVAL          100      /* In microsecs        */
+#define XHPROF_MINIMAL_MEMORY_SAMPLING_INTERVAL   4096     /* In bytes            */
 
 /* Constant for ignoring functions, transparent to hierarchical profile */
 #define XHPROF_MAX_IGNORED_FUNCTIONS  256
@@ -105,6 +113,11 @@ typedef struct hp_entry_t {
     long int                pmu_start_hprof;              /* peak memory usage */
     zend_ulong              tsc_start;         /* start value for TSC counter  */
     zend_ulong              cpu_start;
+    /* XHPROF_FLAGS_CPU_SPLIT: one getrusage() at entry/finish covers these */
+    zend_ulong              ut_start;              /* user CPU, microseconds */
+    zend_ulong              st_start;            /* system CPU, microseconds */
+    zend_long               minflt_start;            /* minor page faults */
+    zend_long               majflt_start;            /* major page faults */
     zend_ulong              hash_code;     /* hash_code for the function name  */
 #if PHP_VERSION_ID >= 80000
     int                     is_trace;
@@ -192,7 +205,10 @@ void hp_init_trace_callbacks();
 
 void hp_init_file_map(int level);
 void hp_record_function_file(zend_string *function_name, zend_function *func);
-void hp_attach_file_map();
+void hp_record_callsite(zend_string *function_name, zend_execute_data *execute_data);
+void hp_init_timeline(int level);
+void hp_init_callsites(int level);
+void hp_attach_session_table(const char *key, size_t key_len, HashTable *table);
 
 double get_timebase_conversion();
 
@@ -245,6 +261,11 @@ ZEND_BEGIN_MODULE_GLOBALS(xhprof)
     zend_long        sampling_interval;
     zend_ulong       sampling_interval_tsc;
     zend_long        sampling_depth;
+    /* xhprof.sampling_memory_interval: record a stack sample whenever
+     * memory usage grows past each interval-sized step (bytes, 0 = off) */
+    zend_long        sampling_memory_interval;
+    /* next usage threshold for the memory-triggered sampler */
+    zend_long        next_mem_threshold;
     /* XHProf flags */
     uint32 xhprof_flags;
 
@@ -264,12 +285,24 @@ ZEND_BEGIN_MODULE_GLOBALS(xhprof)
 
     /* xhprof.collect_files: record the file (and line) each profiled user
      * function is defined in. Dumped as "__files__" into the profile data
-     * by hp_attach_file_map() when profiling stops. */
+     * when profiling stops. */
     zend_bool collect_files;
 
     /* function name => "file:line" map for the current session; allocated
      * by hp_init_file_map() only when collecting is enabled (see above) */
     HashTable *file_map;
+
+    /* xhprof.collect_callsites: record where each caller==>callee pair was
+     * called from, first time the pair is seen. Dumped as "__callsites__". */
+    zend_bool collect_callsites;
+    HashTable *callsites;
+
+    /* xhprof.collect_timeline: record when each function first and last
+     * started (microseconds since profiling began, first <= last). Dumped
+     * as "__timeline__". */
+    zend_bool collect_timeline;
+    HashTable *timeline;
+    zend_ulong timeline_origin;
 
     /* xhprof.profiler: when 0 the profiler is not instrumented at all and
      * neither xhprof_enable() nor xhprof_sample_enable() can start it */

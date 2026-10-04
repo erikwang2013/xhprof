@@ -6,7 +6,7 @@
 
 XHProf 是 PHP 的函数级分层分析器：原始数据采集组件用 C 实现（作为 PHP 扩展），报表/UI 层则完全使用 PHP 实现。它可以报告每个函数的 inclusive 与 exclusive wall time、内存占用、CPU 时间和调用次数，并支持对比两次运行（分层 DIFF 报表）或聚合多次运行的结果。
 
-围绕这个内核，本仓库提供完整工具链：带运行列表与一键对比的 Web UI（flat / parent-child / DIFF / 聚合报表）、调用图与火焰图视图（分层 run 为**近似**、采样 run 为精确）；callgrind、JSON、CSV 与 folded 栈导出；CLI 工具（`bin/xhprofile`、`bin/xhprof-report`，以及可挂进 CI 的回归门禁 `bin/xhprof-diff`）；`docker compose up` 一键演示；以及 `xhprof.profiler=0` 门控——扩展保持加载，但空闲开销回落到未加载扩展的水平。支持 PHP 7.2–8.6。
+围绕这个内核，本仓库提供完整工具链：带运行列表与一键对比的 Web UI（flat / parent-child / DIFF / 聚合报表）、调用图与火焰图视图（分层 run 为**近似**、采样 run 为精确），以及时间线视图；callgrind、JSON、CSV 与 folded 栈导出；CLI 工具（`bin/xhprofile`、`bin/xhprof-report`，以及可挂进 CI 的回归门禁 `bin/xhprof-diff`）；`docker compose up` 一键演示；以及 `xhprof.profiler=0` 门控——扩展保持加载，但空闲开销回落到未加载扩展的水平。支持 PHP 7.2–8.6。
 
 # 为什么选择 xhprof
 - **数据不出本机。** 剖析结果只写入你自己的 `xhprof.output_dir` 并留在那里——无服务、无上传、无遥测。
@@ -17,7 +17,7 @@ XHProf 是 PHP 的函数级分层分析器：原始数据采集组件用 C 实�
 
 <p align="center"><img src="resource/xhprof-architecture.svg" alt="XHProf 架构设计：PHP 运行时、C 扩展、数据契约与存储、报表层四层结构" width="900"></p>
 
-自顶向下四层。用户代码运行在 Zend Engine 上，`xhprof.so` 在函数调用处挂载观察者钩子；扩展按 caller/callee 配对（递归调用记为 `foo@n`），累加 `wt`、`ct`、`cpu`、`mu`、`pmu` 五项指标，也可以按间隔采样而不是逐次追踪。`xhprof_disable()` 把扁平的 `"caller==>callee"` 数组交回 PHP，`save_run()` 将其序列化到 `xhprof.output_dir`，报表层再从这份数据重建调用层次。设置 `xhprof.profiler=0` 时，上述钩子一个都不会注册。
+自顶向下四层。用户代码运行在 Zend Engine 上，`xhprof.so` 在函数调用处挂载观察者钩子；扩展按 caller/callee 配对（递归调用记为 `foo@n`），累加 `wt`、`ct`、`cpu`、`mu`、`pmu`（配 `XHPROF_FLAGS_CPU_SPLIT` 则为 `ut`/`st`/`minflt`/`majflt`），也可以按间隔采样而不是逐次追踪。`xhprof_disable()` 把扁平的 `"caller==>callee"` 数组交回 PHP，`save_run()` 将其序列化到 `xhprof.output_dir`，报表层再从这份数据重建调用层次。设置 `xhprof.profiler=0` 时，上述钩子一个都不会注册。
 
 # 项目设计 / Design
 
@@ -127,6 +127,9 @@ xhprof.output_dir = /tmp/xhprof
 |xhprof.sampling_depth  | INT_MAX | >= v2.* |采样分析器追踪调用链的最大深度|
 |xhprof.collect_additional_info  | 0 | >= v2.1 |采集 mysql_query、curl_exec 的内部信息。默认值为 0，开启值为 1|
 |xhprof.collect_files  | 0 | >= v2.3.16 |记录每个被剖析用户函数的定义文件与行号（内部函数没有）。设为 1 时 run 文件带 `"__files__"` 映射：报告在函数名旁显示 `file:line`，`format=json` 导出为 `"files"`。代价：每次被剖析调用一次哈希查找（约 30ns，约为剖析自身开销的一成），run 文件每函数约增 100 字节|
+|xhprof.collect_callsites  | 0 | >= v2.3.17 |记录每个 `caller==>callee` 对的调用点（`file:line`，取该对首次调用处）。父-子视图在 caller 旁显示，`format=json` 导出为 `"callsites"`。深层递归级别共用首次调用的注解，`foo@2` 等递归变体归到基名对|
+|xhprof.collect_timeline  | 0 | >= v2.3.17 |记录每个函数首次与末次调用的开始时刻（相对剖析起点的微秒）。`format=json` 导出为 `"timeline"`（暂仅数据，无 HTML 视图）|
+|xhprof.sampling_memory_interval  | 0 | >= v2.3.17 |仅采样模式（字节，0=关）。除按时间间隔采样外，堆用量自上次内存采样增长超过该字节数时也记录一个栈样本。样本的折叠、导出与火焰图与时间采样完全一致；采样点=跨过阈值后的首个调用边界，函数内部分配归因给该次调用。低于 4KB 会被钳位；运行中途才开启该项可能立即多出 1 条样本|
 |xhprof.profiler  | 1 | >= v2.3.12 |System（只能写 php.ini / `-d`）。设为 0 时扩展仍加载但不注册任何 observer/proxy：空闲开销回落到未加载扩展的水平；此时 `xhprof_enable()` / `xhprof_sample_enable()` 返回 false 并抛出 `E_WARNING`|
 |xhprof.auto_enable  | 0 | >= v2.3.12 |System。请求启动即自动开启分层剖析，无需调用 `xhprof_enable()`（需 `xhprof.profiler=1`；为 0 时静默不生效）|
 |xhprof.auto_enable_flags  | 0 | >= v2.3.12 |System。`xhprof.auto_enable` 使用的 flags，如 `XHPROF_FLAGS_CPU \| XHPROF_FLAGS_MEMORY`|
@@ -143,6 +146,7 @@ xhprof_enable(XHPROF_FLAGS_NO_BUILTINS | XHPROF_FLAGS_CPU | XHPROF_FLAGS_MEMORY)
 - `XHPROF_FLAGS_NO_BUILTINS` 不分析内置函数
 - `XHPROF_FLAGS_CPU` 采集函数的 CPU 时间
 - `XHPROF_FLAGS_MEMORY` 采集函数的内存占用
+- `XHPROF_FLAGS_CPU_SPLIT` 分别采集用户态（`ut`）与内核态（`st`）CPU 时间，外加次要/主要页错误（`minflt`/`majflt`），替代合并的 `cpu`
 
 示例
 ```php
@@ -170,8 +174,14 @@ print_r($xhprof_data);
 - `wt` 函数/方法执行的耗时
 - `ct` 函数被调用的次数
 - `cpu` 函数/方法执行消耗的 CPU 时间
+- `ut` / `st` 用户态/内核态 CPU 时间，配 `XHPROF_FLAGS_CPU_SPLIT` 使用（替代合并的 `cpu`）
+- `minflt` / `majflt` 次要/主要页错误，配 `XHPROF_FLAGS_CPU_SPLIT` 使用
 - `mu` 函数/方法使用的内存。通过调用 zend_memory_usage 获取内存占用
 - `pmu` 函数/方法使用的峰值内存。通过调用 zend_memory_peak_usage 获取内存
+
+`load::<file>` 条目（include/require）也值得读：它的 `wt` 就是该文件的编译耗时，且只有真正发生编译时条目才存在——由 opcache 命中的文件在外层短路、编译钩子根本不进入，因此 opcache 命中没有 `load::` 条目。
+
+读 profile 时还有一条引擎侧效应要记住（PHP 8.4/8.5 且开启 OPcache，即生产默认）：优化器会整条删除"被调方是纯函数（如 `function f() { return 1; }`）且结果未使用"的调用，这类调用合法地不会出现在 profile 里——需要它出现就给函数加一个副作用。（JIT 不在测试套件覆盖范围内。）
 
 ### PDO::exec
 ### PDO::query
@@ -214,15 +224,49 @@ curl_close($ch);
 curl_exec#http://www.baidu.com
 ```
 
+### 文件函数
+```php
+$config = file_get_contents("/etc/myapp/config.ini");
+$fh = fopen("/var/log/myapp.log", "a");
+```
+##### 输出数据
+```
+file_get_contents#/etc/myapp/config.ini
+fopen#/var/log/myapp.log
+```
+`file_put_contents` 与此相同。
+
+### Redis
+`Redis::get`、`set`、`del`、`expire`、`incr`、`hget`、`hgetall`、`lpush`、`rpush`、`sadd`、`smembers` 会带各自的 key 参数记录：
+```php
+$user = $redis->get("user:42");
+```
+##### 输出数据
+```
+Redis::get#user:42
+```
+
 # 数据导出与可视化
 
 除了 HTML 报表，run 数据还可以导出到浏览器之外：
 
 - **火焰图** — `xhprof_html/flamegraph.php` 为一次 run 渲染火焰图，页面会标明当前是哪种视图。**分层 run 为近似视图**（横幅：*Approximate*）：xhprof 存储的是聚合后的 `caller==>callee` 边，而不是逐次调用帧，因此每个函数的 inclusive 指标会按各出边的占比分摊到它的各个调用上，剩余部分计为自身耗时 —— 火焰块宽度是可信的，聚合边之下的拆分只是估算。**采样 run 为精确视图**（横幅：*Sampled flame graph (exact)*）：每个采样点就是一条完整调用栈，火焰块宽度是真实携带它的采样数，只有采样真正走过的路径才会出现。窄于整条 run 的 `?threshold=<0..1>`（默认 0.01）的火焰块会折叠进 `(others)` 帧。
-- **Callgrind** — 将 run 导出为 callgrind 格式，用 [KCachegrind](https://apps.kde.org/kcachegrind/) 或 QCachegrind 打开，做源码级/被调方分析。
+- **Callgrind** — 将 run 导出为 callgrind 格式，用 [KCachegrind](https://apps.kde.org/kcachegrind/) 或 QCachegrind 打开，做源码级/被调方分析。当 run 带文件映射（`xhprof.collect_files=1`）时，导出会带上 `fl=`/`cfl=`，KCachegrind 里每个函数直接关联到源文件。
+- **时间线** — `xhprof_html/timeline.php`（run 带 timeline 数据时，报表页会出现入口链接）展示每个函数首次与末次调用的时刻：每函数一条横条，从首次调用起点画到末次调用起点——这是时间窗、不是连续执行——相对剖析起点。由 `xhprof.collect_timeline=1` 采集。
 - **JSON / CSV** — flat 报表的机器可读导出，便于脚本、看板或自建 diff。
 
 所有导出都能从报表页面的 **Export** 链接进入（**Export**：Flame Graph (approximate) | JSON | CSV | callgrind）—— 火焰图链接保留 *approximate* 标签，但采样 run 打开的是精确视图。直接 URL 形如 `report.php?format=json`、`report.php?format=csv`、`report.php?format=callgrind`；`report.php?format=folded`（仅限采样 run）按标准火焰图工具格式输出，每个不同的栈一行 `frame;frame;... <sample count>`，非采样 run 会返回 400。
+
+## 从报表跳到源码
+
+采到文件映射（`xhprof.collect_files=1`）后，函数名与调用点旁会出现 `文件:行` 标注。在 UI 运行前定义一个编辑器 URL 模板，它们就变成可点的链接（`%s`=路径、`%d`=行号）：
+
+```php
+define('XHPROF_EDITOR_URL', 'vscode://file%s:%d');
+// 其他常见模板：
+// define('XHPROF_EDITOR_URL', 'phpstorm://open?file=%s&line=%d');
+// define('XHPROF_EDITOR_URL', 'subl://open?url=file://%s&line=%d');
+```
 
 # XHGui recipe
 

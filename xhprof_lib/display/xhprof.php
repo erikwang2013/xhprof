@@ -232,6 +232,14 @@ $display_calls = true;
 // null when the run was profiled without xhprof.collect_files
 $xhprof_run_files = null;
 
+// "caller==>callee" => "file:line" call-site map of the displayed run (see
+// get_run_callsites()); null when the run carries none
+$xhprof_run_callsites = null;
+
+// function => array(first, last) start times of the displayed run (see
+// get_run_timeline()); null when the run carries none
+$xhprof_run_timeline = null;
+
 // The following column headers are sortable
 $sortable_columns = array("fn" => 1,
                           "ct" => 1,
@@ -247,6 +255,10 @@ $sortable_columns = array("fn" => 1,
                           "excl_pmu" => 1,
                           "cpu" => 1,
                           "excl_cpu" => 1,
+                          "minflt" => 1,
+                          "excl_minflt" => 1,
+                          "majflt" => 1,
+                          "excl_majflt" => 1,
                           "samples" => 1,
                           "excl_samples" => 1
                           );
@@ -286,6 +298,16 @@ $descriptions = array(
                       "IPMUse%" => "IPeakMemUse%",
                       "excl_pmu" => "Excl.<br>PeakMemUse<br>(bytes)",
                       "EPMUse%" => "EPeakMemUse%",
+
+                      "minflt" => "Incl. MinorFlt<br>(faults)",
+                      "IMinFlt%" => "IMinFlt%",
+                      "excl_minflt" => "Excl. MinorFlt<br>(faults)",
+                      "EMinFlt%" => "EMinFlt%",
+
+                      "majflt" => "Incl. MajorFlt<br>(faults)",
+                      "IMajFlt%" => "IMajFlt%",
+                      "excl_majflt" => "Excl. MajorFlt<br>(faults)",
+                      "EMajFlt%" => "EMajFlt%",
 
                       "samples" => "Incl. Samples",
                       "ISamples%" => "ISamples%",
@@ -329,6 +351,16 @@ $format_cbk = array(
                       "excl_pmu" => "number_format",
                       "EPMUse%" => "xhprof_percent_format",
 
+                      "minflt" => "number_format",
+                      "IMinFlt%" => "xhprof_percent_format",
+                      "excl_minflt" => "number_format",
+                      "EMinFlt%" => "xhprof_percent_format",
+
+                      "majflt" => "number_format",
+                      "IMajFlt%" => "xhprof_percent_format",
+                      "excl_majflt" => "number_format",
+                      "EMajFlt%" => "xhprof_percent_format",
+
                       "samples" => "number_format",
                       "ISamples%" => "xhprof_percent_format",
                       "excl_samples" => "number_format",
@@ -371,6 +403,16 @@ $diff_descriptions = array(
                       "IPMUse%" => "IPeakMemUse<br>Diff%",
                       "excl_pmu" => "Excl.<br>PeakMemUse<br>Diff<br>(bytes)",
                       "EPMUse%" => "EPeakMemUse<br>Diff%",
+
+                      "minflt" => "Incl. MinorFlt<br>Diff<br>(faults)",
+                      "IMinFlt%" => "IMinFlt<br>Diff%",
+                      "excl_minflt" => "Excl. MinorFlt<br>Diff<br>(faults)",
+                      "EMinFlt%" => "EMinFlt<br>Diff%",
+
+                      "majflt" => "Incl. MajorFlt<br>Diff<br>(faults)",
+                      "IMajFlt%" => "IMajFlt<br>Diff%",
+                      "excl_majflt" => "Excl. MajorFlt<br>Diff<br>(faults)",
+                      "EMajFlt%" => "EMajFlt<br>Diff%",
 
                       "samples" => "Incl. Samples Diff",
                       "ISamples%" => "ISamples Diff%",
@@ -872,6 +914,7 @@ function full_report($url_params, $symbol_tab, $sort, $run1, $run2) {
   global $format_cbk;
   global $display_calls;
   global $base_path;
+  global $xhprof_run_timeline;
   global $base_url;
 
   $possible_metrics = xhprof_get_possible_metrics();
@@ -972,6 +1015,12 @@ function full_report($url_params, $symbol_tab, $sort, $run1, $run2) {
     $links[] = xhprof_render_link('Flame Graph (approximate)',
                                   "$base_path/flamegraph.php?" .
                                   http_build_query($export_params));
+    // only offered when the run actually carries collected timeline data
+    if ($xhprof_run_timeline !== null) {
+      $links[] = xhprof_render_link('Timeline',
+                                    "$base_path/timeline.php?" .
+                                    http_build_query($export_params));
+    }
     foreach (array('json' => 'JSON', 'csv' => 'CSV',
                    'callgrind' => 'callgrind') as $fmt => $label) {
       $links[] = xhprof_render_link($label,
@@ -1131,6 +1180,12 @@ function print_pc_array($url_params, $results, $base_ct, $base_info, $parent,
 
     print("<td>" . xhprof_render_link(htmlspecialchars($info["fn"]), $href));
     print_source_link($info);
+    // where this edge was first called from ("@ file:line")
+    if (isset($info["callsite"]) && $info["callsite"] !== '') {
+      print(' <small class="xhprof_file">'
+            . xhprof_file_link($info["callsite"], '@ ' . $info["callsite"])
+            . '</small>');
+    }
     print(xhprof_pct_bar($info, $base_info));
     print("</td>");
     pc_info($info, $base_ct, $base_info, $parent);
@@ -1170,6 +1225,67 @@ function xhprof_symbol_file($files, $symbol) {
   return '';
 }
 
+/**
+ * Render a "file:line" string, linked to an editor when the consuming
+ * application defines XHPROF_EDITOR_URL - a sprintf template with %s for
+ * the file and %d for the line, e.g. 'vscode://file%s:%d'. Without the
+ * constant, or when the value does not parse as "path:line", the escaped
+ * plain text is returned and the UI is unchanged.
+ *
+ * @param string $file_line  "file:line" (split at the LAST colon, so a
+ *                           Windows drive letter survives)
+ * @param string $text       visible text; defaults to $file_line
+ *
+ * @return string escaped text, or an <a class="xhprof_file"> element
+ */
+function xhprof_file_link($file_line, $text = '') {
+  $file_line = (string)$file_line;
+  if ($text === '') {
+    $text = $file_line;
+  }
+
+  $colon = strrpos($file_line, ':');
+  if (defined('XHPROF_EDITOR_URL') && $colon !== false && $colon > 0
+      && ctype_digit(substr($file_line, $colon + 1))) {
+    $url = sprintf(XHPROF_EDITOR_URL, substr($file_line, 0, $colon),
+                   (int)substr($file_line, $colon + 1));
+    // the explicit flags would override PHP >= 8.1's default and drop
+    // ENT_SUBSTITUTE: invalid UTF-8 in a path must not blank the output
+    return '<a class="xhprof_file" href="'
+           . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE) . '">'
+           . htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE) . '</a>';
+  }
+
+  return htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE);
+}
+
+/**
+ * Return the "file:line" a caller==>callee pair was first called from, or
+ * '' when it is not known. $callsites is the map collected by the
+ * extension (attached to run data as "__callsites__"); keys use the same
+ * "parent==>child" shape as the raw run data, or the bare name when the
+ * caller side is empty.
+ *
+ * Run data names recursive frames "rec@1", "rec@2", ... while the map is
+ * keyed by the base pair: the "@n" suffixes are stripped here so
+ * "rec@1==>rec@2" resolves to the "rec==>rec" entry. All recursion levels
+ * share that one annotation (the collector records the first call site of
+ * the pair and cannot see the callee's recursion level - v1 precision).
+ */
+function xhprof_pair_callsite($callsites, $parent, $child) {
+  if (!is_array($callsites) || !is_string($parent) || !is_string($child)) {
+    return '';
+  }
+
+  $parent = preg_replace('/@\d+$/', '', $parent);
+  $child = preg_replace('/@\d+$/', '', $child);
+
+  $key = ($parent === '') ? $child : $parent . '==>' . $child;
+
+  return (isset($callsites[$key]) && is_scalar($callsites[$key]))
+         ? (string)$callsites[$key] : '';
+}
+
 function print_source_link($info) {
   global $xhprof_run_files;
 
@@ -1178,7 +1294,7 @@ function print_source_link($info) {
   $file = xhprof_symbol_file($xhprof_run_files, $info['fn']);
   if ($file !== '') {
     print(' <small class="xhprof_file">'
-          . htmlspecialchars($file) . '</small>');
+          . xhprof_file_link($file) . '</small>');
   }
 
   if (strncmp($info['fn'], 'run_init', 8) && $info['fn'] !== 'main()') {
@@ -1231,6 +1347,7 @@ function symbol_report($url_params,
   global $display_calls;
   global $base_path;
   global $base_url;
+  global $xhprof_run_callsites;
 
   $possible_metrics = xhprof_get_possible_metrics();
 
@@ -1417,6 +1534,8 @@ function symbol_report($url_params,
     if (($child == $rep_symbol) && ($parent)) {
       $info_tmp = $info;
       $info_tmp["fn"] = $parent;
+      $info_tmp["callsite"] =
+        xhprof_pair_callsite($xhprof_run_callsites, $parent, $rep_symbol);
       $results[] = $info_tmp;
     }
   }
@@ -1435,6 +1554,8 @@ function symbol_report($url_params,
     if ($parent == $rep_symbol) {
       $info_tmp = $info;
       $info_tmp["fn"] = $child;
+      $info_tmp["callsite"] =
+        xhprof_pair_callsite($xhprof_run_callsites, $rep_symbol, $child);
       $results[] = $info_tmp;
       if ($display_calls) {
         $base_ct += $info["ct"];
@@ -1572,6 +1693,8 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
                              $run, $wts, $symbol, $sort, $run1, $run2) {
 
   global $xhprof_run_files;
+  global $xhprof_run_callsites;
+  global $xhprof_run_timeline;
 
   if ($run) {                              // specific run to display?
 
@@ -1591,6 +1714,10 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
       // map simply have none (aggregated runs below are not covered)
       $xhprof_run_files = method_exists($xhprof_runs_impl, 'get_run_files')
         ? $xhprof_runs_impl->get_run_files($runs_array[0], $source) : null;
+      $xhprof_run_callsites = method_exists($xhprof_runs_impl, 'get_run_callsites')
+        ? $xhprof_runs_impl->get_run_callsites($runs_array[0], $source) : null;
+      $xhprof_run_timeline = method_exists($xhprof_runs_impl, 'get_run_timeline')
+        ? $xhprof_runs_impl->get_run_timeline($runs_array[0], $source) : null;
     } else {
       if (!empty($wts)) {
         $wts_array  = explode(",", $wts);
@@ -1628,13 +1755,29 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
     $xhprof_data1 = $xhprof_runs_impl->get_run($run1, $source, $description1);
     $xhprof_data2 = $xhprof_runs_impl->get_run($run2, $source, $description2);
 
-    // diff cells mostly describe run2's shape: prefer its file map, fall
-    // back to run1's when run2 carries none
+    // diff cells mostly describe run2's shape: prefer its maps, fall back
+    // to run1's when run2 carries none
     $xhprof_run_files = null;
     if (method_exists($xhprof_runs_impl, 'get_run_files')) {
       $xhprof_run_files = $xhprof_runs_impl->get_run_files($run2, $source);
       if ($xhprof_run_files === null) {
         $xhprof_run_files = $xhprof_runs_impl->get_run_files($run1, $source);
+      }
+    }
+
+    $xhprof_run_callsites = null;
+    if (method_exists($xhprof_runs_impl, 'get_run_callsites')) {
+      $xhprof_run_callsites = $xhprof_runs_impl->get_run_callsites($run2, $source);
+      if ($xhprof_run_callsites === null) {
+        $xhprof_run_callsites = $xhprof_runs_impl->get_run_callsites($run1, $source);
+      }
+    }
+
+    $xhprof_run_timeline = null;
+    if (method_exists($xhprof_runs_impl, 'get_run_timeline')) {
+      $xhprof_run_timeline = $xhprof_runs_impl->get_run_timeline($run2, $source);
+      if ($xhprof_run_timeline === null) {
+        $xhprof_run_timeline = $xhprof_runs_impl->get_run_timeline($run1, $source);
       }
     }
 

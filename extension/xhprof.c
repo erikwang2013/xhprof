@@ -145,6 +145,26 @@ STD_PHP_INI_ENTRY("xhprof.collect_additional_info", "0", PHP_INI_ALL, OnUpdateBo
  */
 STD_PHP_INI_ENTRY("xhprof.collect_files", "0", PHP_INI_ALL, OnUpdateBool, collect_files, zend_xhprof_globals, xhprof_globals)
 
+/*
+ * collect_callsites
+ * Record where a caller==>callee pair was called from (file and line, first
+ * time the pair is seen); attached to the profile data as "__callsites__".
+ * The default is 0: with it enabled every profiled call builds its pair
+ * key (both names plus one allocation) and probes the table for it -
+ * measured at +164ns per call on a tight loop; only the first call of a
+ * pair performs the (one-off) insert.
+ */
+STD_PHP_INI_ENTRY("xhprof.collect_callsites", "0", PHP_INI_ALL, OnUpdateBool, collect_callsites, zend_xhprof_globals, xhprof_globals)
+
+/*
+ * collect_timeline
+ * Record when each function first and last started, in microseconds since
+ * profiling began; attached to the profile data as "__timeline__". The
+ * default is 0: enabling it costs one table probe and one write per
+ * profiled call - measured at +69ns per call.
+ */
+STD_PHP_INI_ENTRY("xhprof.collect_timeline", "0", PHP_INI_ALL, OnUpdateBool, collect_timeline, zend_xhprof_globals, xhprof_globals)
+
 /* sampling_interval:
  * Sampling interval to be used by the sampling profiler, in microseconds.
  */
@@ -157,6 +177,18 @@ STD_PHP_INI_ENTRY("xhprof.sampling_interval", STRINGIFY(XHPROF_DEFAULT_SAMPLING_
  * Depth to trace call-chain by the sampling profiler
  */
 STD_PHP_INI_ENTRY("xhprof.sampling_depth", STRINGIFY(INT_MAX), PHP_INI_ALL, OnUpdateLong, sampling_depth, zend_xhprof_globals, xhprof_globals)
+
+/* sampling_memory_interval:
+ * Memory-triggered sampling: whenever the request's memory usage grows past
+ * each interval-sized step (in bytes), the current call stack is recorded
+ * into the same samples the time-based sampler produces. Attribution is at
+ * call boundaries: a function's own transient allocations only show up at
+ * the next call after the growth. 0 (the default) disables it. Sampling
+ * mode only: off, it costs one comparison per call; enabled, one
+ * zend_memory_usage() read (~22.5ns) per call, and a stack is recorded
+ * only when a bucket is crossed.
+ */
+STD_PHP_INI_ENTRY("xhprof.sampling_memory_interval", "0", PHP_INI_ALL, OnUpdateLong, sampling_memory_interval, zend_xhprof_globals, xhprof_globals)
 
 /* profiler:
  * Master switch. When 0 the fcall observer / execute hooks are not installed
@@ -233,7 +265,12 @@ PHP_FUNCTION(xhprof_disable)
 {
     if (XHPROF_G(enabled)) {
         hp_stop();
-        hp_attach_file_map();
+        hp_attach_session_table("__files__", sizeof("__files__") - 1,
+                                XHPROF_G(file_map));
+        hp_attach_session_table("__callsites__", sizeof("__callsites__") - 1,
+                                XHPROF_G(callsites));
+        hp_attach_session_table("__timeline__", sizeof("__timeline__") - 1,
+                                XHPROF_G(timeline));
         RETURN_ZVAL(&XHPROF_G(stats_count), 1, 0);
     }
     /* else null is returned */
@@ -282,9 +319,13 @@ static void php_xhprof_init_globals(zend_xhprof_globals *xhprof_globals)
     xhprof_globals->root = NULL;
     xhprof_globals->trace_callbacks = NULL;
     xhprof_globals->file_map = NULL;
+    xhprof_globals->callsites = NULL;
+    xhprof_globals->timeline = NULL;
     xhprof_globals->ignored_functions = NULL;
     xhprof_globals->sampling_interval = XHPROF_DEFAULT_SAMPLING_INTERVAL;
     xhprof_globals->sampling_depth = INT_MAX;
+    xhprof_globals->sampling_memory_interval = 0;
+    xhprof_globals->next_mem_threshold = 0;
 
     /* REGISTER_INI_ENTRIES() overwrites these with the configured values */
     xhprof_globals->profiler = 1;
@@ -494,6 +535,10 @@ static void hp_register_constants(INIT_FUNC_ARGS)
     REGISTER_LONG_CONSTANT("XHPROF_FLAGS_MEMORY",
                          XHPROF_FLAGS_MEMORY,
                          CONST_CS | CONST_PERSISTENT);
+
+    REGISTER_LONG_CONSTANT("XHPROF_FLAGS_CPU_SPLIT",
+                         XHPROF_FLAGS_CPU_SPLIT,
+                         CONST_CS | CONST_PERSISTENT);
 }
 
 /**
@@ -633,6 +678,8 @@ void hp_init_profiler_state(int level)
 
     hp_init_trace_callbacks();
     hp_init_file_map(level);
+    hp_init_timeline(level);
+    hp_init_callsites(level);
 
     /* Call current mode's init cb */
     XHPROF_G(mode_cb).init_cb();
@@ -669,6 +716,18 @@ void hp_clean_profiler_state()
         zend_hash_destroy(XHPROF_G(file_map));
         FREE_HASHTABLE(XHPROF_G(file_map));
         XHPROF_G(file_map) = NULL;
+    }
+
+    if (XHPROF_G(callsites)) {
+        zend_hash_destroy(XHPROF_G(callsites));
+        FREE_HASHTABLE(XHPROF_G(callsites));
+        XHPROF_G(callsites) = NULL;
+    }
+
+    if (XHPROF_G(timeline)) {
+        zend_hash_destroy(XHPROF_G(timeline));
+        FREE_HASHTABLE(XHPROF_G(timeline));
+        XHPROF_G(timeline) = NULL;
     }
 
     if (XHPROF_G(root)) {
@@ -939,33 +998,53 @@ void hp_inc_count(zval *counts, char *name, zend_long count)
 }
 
 /**
- * Allocate the function-file map for this profiling session. Only
- * hierarchical runs with xhprof.collect_files=1 get one; when the map is
- * NULL, hp_record_function_file() is a no-op and no memory is spent on it.
+ * (Re)create one of the optional per-session tables (function-file map,
+ * call sites, timeline). Only hierarchical runs with the matching
+ * xhprof.collect_* setting enabled get one; when the table is NULL the
+ * record functions are no-ops and no memory is spent on it.
  */
+static void hp_reset_session_table(HashTable **table, zend_bool enabled, int level)
+{
+    /* Like stats_count, the tables survive xhprof_disable() until the
+     * request ends: drop any previous session's table so re-enabling always
+     * starts clean and a session with collecting turned off gets none. */
+    if (*table) {
+        zend_hash_destroy(*table);
+        FREE_HASHTABLE(*table);
+        *table = NULL;
+    }
+
+    if (!enabled || level != XHPROF_MODE_HIERARCHICAL) {
+        return;
+    }
+
+    ALLOC_HASHTABLE(*table);
+
+    if (*table) {
+        zend_hash_init(*table, 128, NULL, ZVAL_PTR_DTOR, 0);
+    }
+}
+
 void hp_init_file_map(int level)
 {
-    /* Like stats_count, the map survives xhprof_disable() until the request
-     * ends: drop any previous session's map so re-enabling always starts
-     * clean and a session with collecting turned off gets none. */
-    if (XHPROF_G(file_map)) {
-        zend_hash_destroy(XHPROF_G(file_map));
-        FREE_HASHTABLE(XHPROF_G(file_map));
-        XHPROF_G(file_map) = NULL;
+    hp_reset_session_table(&XHPROF_G(file_map), XHPROF_G(collect_files), level);
+}
+
+void hp_init_callsites(int level)
+{
+    hp_reset_session_table(&XHPROF_G(callsites), XHPROF_G(collect_callsites),
+                           level);
+}
+
+void hp_init_timeline(int level)
+{
+    hp_reset_session_table(&XHPROF_G(timeline), XHPROF_G(collect_timeline),
+                           level);
+
+    if (XHPROF_G(timeline)) {
+        /* "first/last started" are relative to when profiling began */
+        XHPROF_G(timeline_origin) = cycle_timer();
     }
-
-    if (!XHPROF_G(collect_files) || level != XHPROF_MODE_HIERARCHICAL) {
-        return;
-    }
-
-    ALLOC_HASHTABLE(XHPROF_G(file_map));
-
-    if (!XHPROF_G(file_map)) {
-        return;
-    }
-
-    /* values are "file:line" strings, keys are function names */
-    zend_hash_init(XHPROF_G(file_map), 128, NULL, ZVAL_PTR_DTOR, 0);
 }
 
 /**
@@ -993,32 +1072,90 @@ void hp_record_function_file(zend_string *function_name, zend_function *func)
 }
 
 /**
- * Attach the function-file map to the profile data as "__files__" before it
- * is returned by xhprof_disable(). The reporting layer strips the key again
- * in get_run(), so no report computation ever sees it.
+ * Record where a caller==>callee pair was called from, first time the pair
+ * is seen: "file:line" of the call (the caller's file and the line of the
+ * call statement). The caller is the frame below the callee; calls made
+ * through internal callbacks (array_map and friends) have an internal frame
+ * there, whose opline points into the engine - those pairs get no entry.
  */
-void hp_attach_file_map()
+void hp_record_callsite(zend_string *function_name, zend_execute_data *execute_data)
+{
+    zend_execute_data *prev = execute_data->prev_execute_data;
+    hp_entry_t *caller = XHPROF_G(entries);
+    zend_string *key;
+    zval site;
+
+    if (XHPROF_G(callsites) == NULL || caller == NULL || prev == NULL ||
+        prev->func == NULL || prev->func->type != ZEND_USER_FUNCTION ||
+        prev->opline == NULL || prev->func->op_array.filename == NULL) {
+        return;
+    }
+
+    key = strpprintf(0, "%s==>%s", ZSTR_VAL(caller->name_hprof),
+                     ZSTR_VAL(function_name));
+
+    if (zend_hash_exists(XHPROF_G(callsites), key)) {
+        zend_string_release(key);
+        return;
+    }
+
+    ZVAL_STR(&site, strpprintf(0, "%s:%d",
+                               ZSTR_VAL(prev->func->op_array.filename),
+                               (int)prev->opline->lineno));
+    zend_hash_add(XHPROF_G(callsites), key, &site);
+    zend_string_release(key);
+}
+
+/**
+ * Remember when a function started: "first" is written on first sight,
+ * "last" on every start. Keys are base names, so recursion variants share
+ * one entry (same convention as the "__files__" map).
+ */
+static void hp_timeline_touch(zend_string *name, zend_ulong started_us)
+{
+    zval *entry = zend_hash_find(XHPROF_G(timeline), name);
+    zval time_zv;
+
+    if (entry == NULL) {
+        zval times;
+        array_init(&times);
+        add_next_index_long(&times, (zend_long)started_us);
+        add_next_index_long(&times, (zend_long)started_us);
+        zend_hash_add(XHPROF_G(timeline), name, &times);
+        return;
+    }
+
+    ZVAL_LONG(&time_zv, (zend_long)started_us);
+    zend_hash_index_update(Z_ARRVAL_P(entry), 1, &time_zv);
+}
+
+/**
+ * Copy one of the session tables into the profile data under the given key
+ * (e.g. "__files__") before xhprof_disable() returns it. The reporting
+ * layer strips the keys again in get_run(), so no report computation ever
+ * sees them.
+ */
+void hp_attach_session_table(const char *key, size_t key_len, HashTable *table)
 {
     zend_string *name;
-    zval *file;
-    zval files;
+    zval *value;
+    zval result;
 
-    if (XHPROF_G(file_map) == NULL ||
-        zend_hash_num_elements(XHPROF_G(file_map)) == 0 ||
+    if (table == NULL || zend_hash_num_elements(table) == 0 ||
         Z_TYPE(XHPROF_G(stats_count)) != IS_ARRAY) {
         return;
     }
 
-    array_init(&files);
-    ZEND_HASH_FOREACH_STR_KEY_VAL(XHPROF_G(file_map), name, file) {
-        if (name != NULL && file != NULL) {
-            Z_TRY_ADDREF_P(file);
-            zend_hash_add(Z_ARRVAL(files), name, file);
+    array_init(&result);
+    ZEND_HASH_FOREACH_STR_KEY_VAL(table, name, value) {
+        if (name != NULL && value != NULL) {
+            Z_TRY_ADDREF_P(value);
+            zend_hash_add(Z_ARRVAL(result), name, value);
         }
     } ZEND_HASH_FOREACH_END();
 
-    zend_hash_str_update(Z_ARRVAL(XHPROF_G(stats_count)), "__files__",
-                         sizeof("__files__") - 1, &files);
+    zend_hash_str_update(Z_ARRVAL(XHPROF_G(stats_count)), key, key_len,
+                         &result);
 }
 
 /**
@@ -1052,13 +1189,15 @@ void hp_trunc_time(struct timeval *tv, zend_ulong intr)
  * @return void
  * @author veeve
  */
-void hp_sample_stack(hp_entry_t  **entries)
+void hp_sample_stack(hp_entry_t  **entries, struct timeval *key_tv)
 {
     char key[SCRATCH_BUF_LEN];
     size_t symbol_len;
 
-    /* Build key */
-    snprintf(key, sizeof(key), "%d.%06d", (uint32) XHPROF_G(last_sample_time).tv_sec, (uint32) XHPROF_G(last_sample_time).tv_usec);
+    /* Build key. Two samples inside the same microsecond share a key and
+     * fold into one entry: add_assoc_string() updates, so the later stack
+     * overwrites the earlier one. */
+    snprintf(key, sizeof(key), "%d.%06d", (uint32) key_tv->tv_sec, (uint32) key_tv->tv_usec);
 
     /* A fixed 512KB C stack buffer used to live here; use a per request heap
      * buffer instead, sized for the symbol that is about to be built (a fixed
@@ -1106,7 +1245,7 @@ void hp_sample_check(hp_entry_t **entries)
         incr_us_interval(&XHPROF_G(last_sample_time), XHPROF_G(sampling_interval));
 
         /* sample the stack */
-        hp_sample_stack(entries);
+        hp_sample_stack(entries, &XHPROF_G(last_sample_time));
     }
 }
 
@@ -1216,6 +1355,28 @@ void hp_mode_sampled_init_cb()
 
     /* Convert sampling interval to ticks */
     XHPROF_G(sampling_interval_tsc) = XHPROF_G(sampling_interval);
+
+    /* Memory-triggered sampling: first sample once usage grows past the
+     * interval. Clamped like the time interval is: below the minimum the
+     * sample's own allocation would cross the threshold again right away,
+     * and PHP_INT_MAX-sized values would overflow the threshold addition.
+     * A negative interval makes no sense; 0 means the feature is off. */
+    if (XHPROF_G(sampling_memory_interval) < 0) {
+        XHPROF_G(sampling_memory_interval) = 0;
+    }
+
+    if (XHPROF_G(sampling_memory_interval) > 0) {
+        if (XHPROF_G(sampling_memory_interval) < XHPROF_MINIMAL_MEMORY_SAMPLING_INTERVAL) {
+            XHPROF_G(sampling_memory_interval) = XHPROF_MINIMAL_MEMORY_SAMPLING_INTERVAL;
+        } else if (XHPROF_G(sampling_memory_interval) > ZEND_LONG_MAX / 2) {
+            XHPROF_G(sampling_memory_interval) = ZEND_LONG_MAX / 2;
+        }
+
+        XHPROF_G(next_mem_threshold) = (zend_long)zend_memory_usage(0)
+                                       + XHPROF_G(sampling_memory_interval);
+    } else {
+        XHPROF_G(next_mem_threshold) = 0;
+    }
 }
 
 
@@ -1224,6 +1385,48 @@ void hp_mode_sampled_init_cb()
  * XHPROF BEGIN FUNCTION CALLBACKS
  * ************************************
  */
+
+/**
+ * XHPROF_FLAGS_CPU_SPLIT's entry/exit pair: one getrusage() covers user and
+ * system CPU plus the page fault counters. The Windows shim
+ * (win32/getrusage.h) has no fault fields, so those are simply not recorded
+ * there.
+ */
+static void hp_split_start(hp_entry_t *current)
+{
+    struct rusage ru;
+
+    getrusage(RUSAGE_SELF, &ru);
+    current->ut_start = (zend_ulong)ru.ru_utime.tv_sec * 1000000
+                        + (zend_ulong)ru.ru_utime.tv_usec;
+    current->st_start = (zend_ulong)ru.ru_stime.tv_sec * 1000000
+                        + (zend_ulong)ru.ru_stime.tv_usec;
+#ifndef ZEND_WIN32
+    current->minflt_start = (zend_long)ru.ru_minflt;
+    current->majflt_start = (zend_long)ru.ru_majflt;
+#endif
+}
+
+static void hp_split_end(zval *counts, hp_entry_t *top)
+{
+    struct rusage ru;
+    zend_ulong ut, st;
+
+    getrusage(RUSAGE_SELF, &ru);
+    ut = (zend_ulong)ru.ru_utime.tv_sec * 1000000
+         + (zend_ulong)ru.ru_utime.tv_usec;
+    st = (zend_ulong)ru.ru_stime.tv_sec * 1000000
+         + (zend_ulong)ru.ru_stime.tv_usec;
+
+    hp_inc_count(counts, "ut", (zend_long)(ut - top->ut_start));
+    hp_inc_count(counts, "st", (zend_long)(st - top->st_start));
+#ifndef ZEND_WIN32
+    hp_inc_count(counts, "minflt",
+                 (zend_long)ru.ru_minflt - top->minflt_start);
+    hp_inc_count(counts, "majflt",
+                 (zend_long)ru.ru_majflt - top->majflt_start);
+#endif
+}
 
 /**
  * XHPROF_MODE_HIERARCHICAL's begin function callback
@@ -1235,8 +1438,16 @@ void hp_mode_hier_beginfn_cb(hp_entry_t **entries, hp_entry_t  *current)
     /* Get start tsc counter */
     current->tsc_start = cycle_timer();
 
+    /* timeline: when this function started, relative to profiling start */
+    if (XHPROF_G(timeline)) {
+        hp_timeline_touch(current->name_hprof,
+                          current->tsc_start - XHPROF_G(timeline_origin));
+    }
+
     /* Get CPU usage */
-    if (XHPROF_G(xhprof_flags) & XHPROF_FLAGS_CPU) {
+    if (XHPROF_G(xhprof_flags) & XHPROF_FLAGS_CPU_SPLIT) {
+        hp_split_start(current);
+    } else if (XHPROF_G(xhprof_flags) & XHPROF_FLAGS_CPU) {
         current->cpu_start = cpu_timer();
     }
 
@@ -1255,6 +1466,31 @@ void hp_mode_hier_beginfn_cb(hp_entry_t **entries, hp_entry_t  *current)
  */
 void hp_mode_sampled_beginfn_cb(hp_entry_t **entries, hp_entry_t *current)
 {
+    /* Memory-triggered sampling: when usage first grows past the next
+     * interval-sized step, record the stack once (at most one sample per
+     * call - a function's own allocations only show up at the next call
+     * boundary). The threshold is advanced in a loop so it always ends up
+     * above the current usage: a later drop and re-growth triggers again. */
+    if (XHPROF_G(sampling_memory_interval) > 0 &&
+        entries != NULL && *entries != NULL) {
+        zend_long mu = (zend_long)zend_memory_usage(0);
+
+        if (mu >= XHPROF_G(next_mem_threshold)) {
+            struct timeval now;
+
+            gettimeofday(&now, 0);
+            hp_sample_stack(entries, &now);
+
+            /* Re-read after sampling: the sample's own allocation (key
+             * string + stack buffer) must not push usage past the next
+             * threshold and become the trigger for another sample. */
+            mu = (zend_long)zend_memory_usage(0);
+            while (XHPROF_G(next_mem_threshold) <= mu) {
+                XHPROF_G(next_mem_threshold) += XHPROF_G(sampling_memory_interval);
+            }
+        }
+    }
+
     /* See if its time to take a sample */
     hp_sample_check(entries);
 }
@@ -1315,7 +1551,10 @@ void hp_mode_hier_endfn_cb(hp_entry_t **entries)
     hp_inc_count(counts, "ct", 1);
     hp_inc_count(counts, "wt", wt);
 
-    if (XHPROF_G(xhprof_flags) & XHPROF_FLAGS_CPU) {
+    if (XHPROF_G(xhprof_flags) & XHPROF_FLAGS_CPU_SPLIT) {
+        /* Supersedes XHPROF_FLAGS_CPU: ut/st/minflt/majflt, no merged cpu */
+        hp_split_end(counts, top);
+    } else if (XHPROF_G(xhprof_flags) & XHPROF_FLAGS_CPU) {
         cpu = cpu_timer() - top->cpu_start;
 
         /* Bump CPU stats in the counts hashtable */
@@ -1895,6 +2134,28 @@ zend_string *hp_trace_callback_curl_exec(zend_string *symbol, zend_execute_data 
     return result;
 }
 
+/**
+ * File and cache calls pass what identifies them as their first argument
+ * (path, key): append it to the symbol the way the SQL callbacks do their
+ * query. A missing or non-string first argument leaves the symbol alone
+ * rather than fabricating one.
+ */
+zend_string *hp_trace_callback_arg0(zend_string *symbol, zend_execute_data *data)
+{
+    zval *arg;
+
+    if (ZEND_CALL_NUM_ARGS(data) < 1) {
+        return strpprintf(0, "%s", ZSTR_VAL(symbol));
+    }
+
+    arg = ZEND_CALL_ARG(data, 1);
+    if (Z_TYPE_P(arg) != IS_STRING) {
+        return strpprintf(0, "%s", ZSTR_VAL(symbol));
+    }
+
+    return strpprintf(0, "%s#%s", ZSTR_VAL(symbol), Z_STRVAL_P(arg));
+}
+
 static inline void hp_free_trace_callbacks(zval *val) {
     efree(Z_PTR_P(val));
 }
@@ -1932,4 +2193,21 @@ void hp_init_trace_callbacks()
 
     callback = hp_trace_callback_curl_exec;
     register_trace_callback("curl_exec", callback);
+
+    callback = hp_trace_callback_arg0;
+    register_trace_callback("file_get_contents", callback);
+    register_trace_callback("file_put_contents", callback);
+    register_trace_callback("fopen", callback);
+
+    register_trace_callback("Redis::get", callback);
+    register_trace_callback("Redis::set", callback);
+    register_trace_callback("Redis::del", callback);
+    register_trace_callback("Redis::expire", callback);
+    register_trace_callback("Redis::incr", callback);
+    register_trace_callback("Redis::hget", callback);
+    register_trace_callback("Redis::hgetall", callback);
+    register_trace_callback("Redis::lpush", callback);
+    register_trace_callback("Redis::rpush", callback);
+    register_trace_callback("Redis::sadd", callback);
+    register_trace_callback("Redis::smembers", callback);
 }

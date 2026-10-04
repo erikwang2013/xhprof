@@ -124,7 +124,11 @@ if ($format === 'callgrind') {
   header('Content-Type: text/plain; charset=UTF-8');
   header('Content-Disposition: attachment; filename="'
          . $file_base . '.callgrind"');
-  echo xhprof_callgrind_report($raw_data, $description);
+  // with the collected file map the export points KCachegrind & co at the
+  // real source files; runs without it keep the position-less output
+  echo xhprof_callgrind_report($raw_data, $description,
+        method_exists($xhprof_runs_impl, 'get_run_files')
+          ? $xhprof_runs_impl->get_run_files($run, $source) : null);
   return;
 }
 
@@ -149,10 +153,19 @@ if ($format === 'json') {
                          'description' => $description,
                          'metrics' => $metrics,
                          'totals' => $totals,
-                         // function => "file:line", or null when the run
-                         // was profiled without xhprof.collect_files
+                         // metadata maps collected by the extension; null
+                         // when the run carries none: "files" (function =>
+                         // "file:line"), "callsites" ("caller==>callee" =>
+                         // "file:line") and "timeline" (function =>
+                         // [first_start_us, last_start_us])
                          'files' => method_exists($xhprof_runs_impl, 'get_run_files')
                                     ? $xhprof_runs_impl->get_run_files($run, $source)
+                                    : null,
+                         'callsites' => method_exists($xhprof_runs_impl, 'get_run_callsites')
+                                    ? $xhprof_runs_impl->get_run_callsites($run, $source)
+                                    : null,
+                         'timeline' => method_exists($xhprof_runs_impl, 'get_run_timeline')
+                                    ? $xhprof_runs_impl->get_run_timeline($run, $source)
                                     : null,
                          'functions' => $flat_data),
                    JSON_INVALID_UTF8_SUBSTITUTE);

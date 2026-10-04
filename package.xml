@@ -40,11 +40,11 @@
   <email>longxinhui@php.net</email>
   <active>yes</active>
  </lead>
- <date>2026-10-04</date>
- <time>12:17:22</time>
+ <date>2026-10-05</date>
+ <time>00:20:00</time>
  <version>
-  <release>2.3.16</release>
-  <api>2.3.16</api>
+  <release>2.3.17</release>
+  <api>2.3.17</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,24 +52,43 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - New: opt-in function source map. With xhprof.collect_files=1 the
-      extension records the file and declaration line of every profiled
-      user function (functions, methods and closures; internals and the
-      load::/eval:: entries carry no file of their own). The map travels
-      with the run file as "__files__"; the reporting layer strips it on
-      read (get_run() output is unchanged, get_run_files() serves it),
-      shows "file:line" next to the function name in the flat,
-      parent-child and single-function views, and exports it under
-      "files" in format=json. Runs profiled without the setting simply
-      have no map and no extra UI.
-    - The setting defaults to 0: while enabled, each profiled call pays
-      one hash lookup to remember the file - measured at ~30ns per call
-      (+11% on top of the profiler's own overhead in a tight call loop);
-      a run file grows by the map, ~100 bytes per distinct function.
-    - New extension test xhprof_026.phpt covers the collection, the
-      recursion/base-name keying and the opt-in behavior; the extension
-      suite passes 26/26 and the report-layer suite 156/156 on PHP 8.5.
-    - Everything else is identical to 2.3.15.
+    - Metrics batch. XHPROF_FLAGS_CPU_SPLIT (0x0008) records user/system
+      CPU time (ut/st) and minor/major page faults (minflt/majflt) from
+      one getrusage() pair per call instead of the merged cpu time. New
+      opt-in collectors, all defaulting to 0 and hierarchical-runs-only:
+      xhprof.collect_callsites (__callsites__: "caller==>callee" => call
+      site "file:line", shown in the parent-child view),
+      xhprof.collect_timeline (__timeline__: per-function first/last call
+      start time in microseconds) and xhprof.sampling_memory_interval
+      (sampling mode additionally records a stack when heap usage crosses
+      a byte threshold). The trace callbacks
+      (xhprof.collect_additional_info) now also cover file_get_contents /
+      file_put_contents / fopen and eleven Redis methods.
+    - New views and integrations: xhprof_html/timeline.php shows when
+      each function was first and last called; callgrind exports carry
+      fl=/cfl= file mapping when the run has the file map (KCachegrind
+      links functions to their sources); XHPROF_EDITOR_URL turns the
+      file:line annotations into editor links. Memory-triggered sampling
+      is implemented as a call-boundary threshold check: the
+      zend_mm custom-handler route was evaluated and rejected with
+      evidence (switching the heap at MINIT aborts in standard builds,
+      the only viable world costs ~24% on every request and kills mu/pmu,
+      and the handler would segfault every process exit after dlclose).
+    - Measured per-call costs (1M-call loop, on top of the profiler's own
+      ~295ns/call): CPU_SPLIT +2.74us (the plain CPU flag costs +2.14us),
+      collect_callsites +164ns, collect_timeline +69ns; memory sampling
+      costs one integer comparison when off.
+    - Hardening from two independent review rounds: recursive call sites
+      resolve via base names (@n stripped on both sides), same-microsecond
+      memory samples keep the last stack, the sampling threshold advances
+      past the sampler's own allocations and is clamped (4KB floor,
+      ZEND_LONG_MAX/2 ceiling), invalid UTF-8 source paths survive
+      (ENT_SUBSTITUTE), recursive self-costs keep their file mapping.
+    - Tests: xhprof_027 (metrics batch), xhprof_028 (memory sampling),
+      xhprof_029 (cross-feature acceptance); report-layer suite 193
+      checks. Extension suite 29/29 on PHP 8.5, run end-to-end a second
+      time on the fully integrated tree.
+    - Everything else is identical to 2.3.16.
  </notes>
  <contents>
   <dir name="/">
@@ -119,6 +138,10 @@
    <file name="extension/tests/xhprof_024.phpt" role="test" />
    <file name="extension/tests/xhprof_025.phpt" role="test" />
    <file name="extension/tests/xhprof_026.phpt" role="test" />
+   <file name="extension/tests/xhprof_027.phpt" role="test" />
+   <file name="extension/tests/xhprof_028.phpt" role="test" />
+   <file name="extension/tests/xhprof_029.phpt" role="test" />
+   <file name="extension/tests/xhprof_029_inc.php" role="test" />
    <file name="tests/php/report_layer_test.php" role="test" />
    <file name="extension/config.m4" role="src" />
    <file name="extension/config.w32" role="src" />
@@ -137,6 +160,7 @@
    <file name="xhprof_html/js/xhprof_report.js" role="php" />
    <file name="xhprof_html/js/flamegraph.js" role="php" />
    <file name="xhprof_html/flamegraph.php" role="php" />
+   <file name="xhprof_html/timeline.php" role="php" />
    <file name="xhprof_html/report.php" role="php" />
    <file name="xhprof_html/xhpy.svg" role="php" />
    <file name="xhprof_html/xhpy-blink.svg" role="php" />
@@ -170,6 +194,28 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-05</date>
+      <version>
+       <release>2.3.17</release>
+       <api>2.3.17</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - Metrics batch: XHPROF_FLAGS_CPU_SPLIT (ut/st/minflt/majflt,
+         replaces merged cpu), opt-in xhprof.collect_callsites /
+         xhprof.collect_timeline, memory-triggered stack samples in
+         sampling mode (xhprof.sampling_memory_interval), file/Redis
+         trace callbacks. New timeline view, callgrind file mapping
+         (fl=/cfl=) and XHPROF_EDITOR_URL editor links. 29/29 extension
+         tests, 193 report-layer checks on PHP 8.5. Everything else
+         identical to 2.3.16.
+      </notes>
+   </release>
+
    <release>
       <date>2026-10-04</date>
       <version>

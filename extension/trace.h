@@ -148,6 +148,10 @@ static zend_always_inline int begin_profiling(zend_string *root_symbol, zend_exe
              * xhprof.collect_files=1 in a hierarchical run. */
             hp_record_function_file(function_name, execute_data->func);
             function_name = hp_get_trace_callback(function_name, execute_data);
+            /* The call site is recorded after the rename so its pair key
+             * matches the symbol this call is stored under. Same one
+             * pointer check when xhprof.collect_callsites=0. */
+            hp_record_callsite(function_name, execute_data);
         }
 
         hp_entry_t *cur_entry = hp_fast_alloc_hprof_entry();

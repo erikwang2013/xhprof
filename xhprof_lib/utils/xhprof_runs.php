@@ -177,15 +177,27 @@ class XHProfRuns_Default implements iXHProfRuns {
       return null;
     }
 
-    // The extension attaches a function => "file:line" map as "__files__"
-    // (xhprof.collect_files=1). Strip it before expand/sanitize: sanitize
-    // would zero the non-numeric strings, and every computation below
-    // treats top level keys as functions. get_run_files() serves it.
+    // The extension attaches metadata maps: "__files__" (function =>
+    // "file:line"), "__callsites__" ("caller==>callee" => "file:line") and
+    // "__timeline__" (function => first/last start time). Strip them before
+    // expand/sanitize: sanitize would zero the non-numeric strings, and
+    // every computation below treats top level keys as functions. The
+    // get_run_*() accessors serve them; xhprof_sanitize_run_data() drops
+    // the keys as well so direct readers of run files are protected too.
     $run_files = null;
     if (isset($raw_data['__files__']) && is_array($raw_data['__files__'])) {
       $run_files = $raw_data['__files__'];
     }
-    unset($raw_data['__files__']);
+    $run_callsites = null;
+    if (isset($raw_data['__callsites__']) && is_array($raw_data['__callsites__'])) {
+      $run_callsites = $raw_data['__callsites__'];
+    }
+    $run_timeline = null;
+    if (isset($raw_data['__timeline__']) && is_array($raw_data['__timeline__'])) {
+      $run_timeline = $raw_data['__timeline__'];
+    }
+    unset($raw_data['__files__'], $raw_data['__callsites__'],
+          $raw_data['__timeline__']);
 
     // sampling profiler runs arrive as "timestamp => stack" entries; fold
     // them into the parent/child shape the reports expect.
@@ -198,16 +210,19 @@ class XHProfRuns_Default implements iXHProfRuns {
     $run_desc = "XHProf Run (Namespace=$type)";
     self::$cached_runs[$file_name] = array('desc' => $run_desc,
                                            'data' => $raw_data,
-                                           'files' => $run_files);
+                                           'files' => $run_files,
+                                           'callsites' => $run_callsites,
+                                           'timeline' => $run_timeline);
     return $raw_data;
   }
 
   /**
-   * Return the function => "file:line" map of a run, or null when the run
-   * carries none (profiled without xhprof.collect_files, a sampling-mode
-   * run, or a run saved before this data was collected).
+   * Return one of a run's metadata maps, or null when the run carries
+   * none (profiled without the matching collector, a sampling-mode run,
+   * or a run saved before the data was collected). The maps are stripped
+   * from get_run()'s return value and cached alongside it.
    */
-  public function get_run_files($run_id, $type = 'xhprof') {
+  private function get_run_extra($run_id, $type, $key) {
     $desc = '';
     if ($this->get_run($run_id, $type, $desc) === null) {
       return null;
@@ -218,7 +233,22 @@ class XHProfRuns_Default implements iXHProfRuns {
       return null;
     }
 
-    return self::$cached_runs[$file_name]['files'];
+    return self::$cached_runs[$file_name][$key];
+  }
+
+  /** function => "file:line" definition map (xhprof.collect_files=1) */
+  public function get_run_files($run_id, $type = 'xhprof') {
+    return $this->get_run_extra($run_id, $type, 'files');
+  }
+
+  /** "caller==>callee" => "file:line" call-site map of a run */
+  public function get_run_callsites($run_id, $type = 'xhprof') {
+    return $this->get_run_extra($run_id, $type, 'callsites');
+  }
+
+  /** function => array(first_start_us, last_start_us) since profiling start */
+  public function get_run_timeline($run_id, $type = 'xhprof') {
+    return $this->get_run_extra($run_id, $type, 'timeline');
   }
 
   /**

@@ -39,6 +39,8 @@ function xhprof_get_possible_metrics() {
          "cpu" => array("Cpu", "microsecs", "cpu time"),
          "mu" => array("MUse", "bytes", "memory usage"),
          "pmu" => array("PMUse", "bytes", "peak memory usage"),
+         "minflt" => array("MinFlt", "faults", "minor page faults"),
+         "majflt" => array("MajFlt", "faults", "major page faults"),
          "samples" => array("Samples", "samples", "cpu time"));
  return $possible_metrics;
 }
@@ -99,6 +101,11 @@ function init_metrics($xhprof_data, $rep_symbol, $sort, $diff_report = false) {
   }
 
   $pc_stats = $stats;
+
+  // rebuilt on every call like $stats above: the globals outlive a single
+  // init_metrics() in long-running processes (tests, CLI tools) and must
+  // not accumulate the metrics of earlier runs
+  $metrics = array();
 
   $possible_metrics = xhprof_get_possible_metrics();
   foreach ($possible_metrics as $metric => $desc) {
@@ -307,12 +314,15 @@ function xhprof_sanitize_run_data($raw_data) {
     return $raw_data;
   }
 
-  // The extension's function => "file:line" map (xhprof.collect_files) is
-  // not a function entry. Reports that read run files directly, without
-  // going through get_run() (the bin/ CLIs, and any custom reader that
-  // sanitizes), must not mistake it for one. get_run() already strips the
-  // key before sanitizing; dropping it again here is a no-op there.
-  unset($raw_data['__files__']);
+  // The extension's metadata maps are not function entries: "__files__"
+  // (function => "file:line"), "__callsites__" ("caller==>callee" =>
+  // "file:line") and "__timeline__" (function => first/last start time).
+  // Reports that read run files directly, without going through get_run()
+  // (the bin/ CLIs, and any custom reader that sanitizes), must not
+  // mistake them for functions. get_run() already strips the keys before
+  // sanitizing; dropping them again here is a no-op there.
+  unset($raw_data['__files__'], $raw_data['__callsites__'],
+        $raw_data['__timeline__']);
 
   // the metrics main() carries are the ones the report looks up on
   // every entry.
