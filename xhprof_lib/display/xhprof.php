@@ -228,6 +228,10 @@ $diff_mode = false;
 // call count data present?
 $display_calls = true;
 
+// function => "file:line" map of the displayed run (see get_run_files());
+// null when the run was profiled without xhprof.collect_files
+$xhprof_run_files = null;
+
 // The following column headers are sortable
 $sortable_columns = array("fn" => 1,
                           "ct" => 1,
@@ -1134,7 +1138,49 @@ function print_pc_array($url_params, $results, $base_ct, $base_info, $parent,
   }
 }
 
+/**
+ * Return the "file:line" a symbol is defined in, or '' when it is not
+ * known. $files is the map collected via xhprof.collect_files (attached to
+ * the profile data as "__files__").
+ *
+ * Not every symbol needs a map entry: closures compiled by PHP >= 8.4
+ * carry "{closure:file:line}" in their name, and includes/evals show up as
+ * "load::file" / "eval::file" - those name their source themselves.
+ */
+function xhprof_symbol_file($files, $symbol) {
+  if (!is_array($files) || !is_string($symbol)) {
+    return '';
+  }
+
+  // recursion variants ("foo@2") are the same function as "foo"
+  $base = preg_replace('/@\d+$/', '', $symbol);
+
+  if (isset($files[$base]) && is_scalar($files[$base])) {
+    return (string)$files[$base];
+  }
+
+  if (preg_match('/^\{closure:(.+):(\d+)\}$/', $base, $m)) {
+    return $m[1] . ':' . $m[2];
+  }
+
+  if (strncmp($base, 'load::', 6) === 0 || strncmp($base, 'eval::', 6) === 0) {
+    return substr($base, 6);
+  }
+
+  return '';
+}
+
 function print_source_link($info) {
+  global $xhprof_run_files;
+
+  // the collected definition file, shown inline where the legacy external
+  // "source" lookup link also appears
+  $file = xhprof_symbol_file($xhprof_run_files, $info['fn']);
+  if ($file !== '') {
+    print(' <small class="xhprof_file">'
+          . htmlspecialchars($file) . '</small>');
+  }
+
   if (strncmp($info['fn'], 'run_init', 8) && $info['fn'] !== 'main()') {
     if (defined('XHPROF_SYMBOL_LOOKUP_URL')) {
       $link = xhprof_render_link(
@@ -1525,6 +1571,8 @@ function profiler_diff_report($url_params,
 function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
                              $run, $wts, $symbol, $sort, $run1, $run2) {
 
+  global $xhprof_run_files;
+
   if ($run) {                              // specific run to display?
 
     // run may be a single run or a comma separate list of runs
@@ -1538,6 +1586,11 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
       $xhprof_data = $xhprof_runs_impl->get_run($runs_array[0],
                                                 $source,
                                                 $description);
+
+      // display decoration only: implementations that do not collect the
+      // map simply have none (aggregated runs below are not covered)
+      $xhprof_run_files = method_exists($xhprof_runs_impl, 'get_run_files')
+        ? $xhprof_runs_impl->get_run_files($runs_array[0], $source) : null;
     } else {
       if (!empty($wts)) {
         $wts_array  = explode(",", $wts);
@@ -1574,6 +1627,16 @@ function displayXHProfReport($xhprof_runs_impl, $url_params, $source,
 
     $xhprof_data1 = $xhprof_runs_impl->get_run($run1, $source, $description1);
     $xhprof_data2 = $xhprof_runs_impl->get_run($run2, $source, $description2);
+
+    // diff cells mostly describe run2's shape: prefer its file map, fall
+    // back to run1's when run2 carries none
+    $xhprof_run_files = null;
+    if (method_exists($xhprof_runs_impl, 'get_run_files')) {
+      $xhprof_run_files = $xhprof_runs_impl->get_run_files($run2, $source);
+      if ($xhprof_run_files === null) {
+        $xhprof_run_files = $xhprof_runs_impl->get_run_files($run1, $source);
+      }
+    }
 
     if (!is_array($xhprof_data1) || !is_array($xhprof_data2)) {
       echo "<hr>Could not load XHProf run: "

@@ -70,6 +70,11 @@ class XHProfRuns_Default implements iXHProfRuns {
   private $dir = '';
   private $suffix = 'xhprof';
 
+  // Runs already read during this request, keyed by file name, each an
+  // array('desc' => ..., 'data' => ..., 'files' => ...). Static so the
+  // memoization is shared between get_run() and get_run_files().
+  private static $cached_runs = array();
+
   private function gen_run_id($type) {
     return uniqid();
   }
@@ -137,17 +142,15 @@ class XHProfRuns_Default implements iXHProfRuns {
   public function get_run($run_id, $type, &$run_desc) {
     // memoize runs already read during this request (e.g. the typeahead
     // endpoint can ask for the same run more than once).
-    static $cached_runs = array();
-
     $file_name = $this->file_name($run_id, $type);
     if ($file_name === null) {
       $run_desc = "Invalid Run Id = " . (is_scalar($run_id) ? $run_id : '');
       return null;
     }
 
-    if (isset($cached_runs[$file_name])) {
-      $run_desc = $cached_runs[$file_name]['desc'];
-      return $cached_runs[$file_name]['data'];
+    if (isset(self::$cached_runs[$file_name])) {
+      $run_desc = self::$cached_runs[$file_name]['desc'];
+      return self::$cached_runs[$file_name]['data'];
     }
 
     if (!file_exists($file_name)) {
@@ -174,6 +177,16 @@ class XHProfRuns_Default implements iXHProfRuns {
       return null;
     }
 
+    // The extension attaches a function => "file:line" map as "__files__"
+    // (xhprof.collect_files=1). Strip it before expand/sanitize: sanitize
+    // would zero the non-numeric strings, and every computation below
+    // treats top level keys as functions. get_run_files() serves it.
+    $run_files = null;
+    if (isset($raw_data['__files__']) && is_array($raw_data['__files__'])) {
+      $run_files = $raw_data['__files__'];
+    }
+    unset($raw_data['__files__']);
+
     // sampling profiler runs arrive as "timestamp => stack" entries; fold
     // them into the parent/child shape the reports expect.
     $raw_data = xhprof_expand_sampled_run($raw_data);
@@ -183,8 +196,29 @@ class XHProfRuns_Default implements iXHProfRuns {
     $raw_data = xhprof_sanitize_run_data($raw_data);
 
     $run_desc = "XHProf Run (Namespace=$type)";
-    $cached_runs[$file_name] = array('desc' => $run_desc, 'data' => $raw_data);
+    self::$cached_runs[$file_name] = array('desc' => $run_desc,
+                                           'data' => $raw_data,
+                                           'files' => $run_files);
     return $raw_data;
+  }
+
+  /**
+   * Return the function => "file:line" map of a run, or null when the run
+   * carries none (profiled without xhprof.collect_files, a sampling-mode
+   * run, or a run saved before this data was collected).
+   */
+  public function get_run_files($run_id, $type = 'xhprof') {
+    $desc = '';
+    if ($this->get_run($run_id, $type, $desc) === null) {
+      return null;
+    }
+
+    $file_name = $this->file_name($run_id, $type);
+    if ($file_name === null || !isset(self::$cached_runs[$file_name])) {
+      return null;
+    }
+
+    return self::$cached_runs[$file_name]['files'];
   }
 
   /**

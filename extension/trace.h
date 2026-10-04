@@ -142,6 +142,11 @@ static zend_always_inline int begin_profiling(zend_string *root_symbol, zend_exe
     int profile_curr = !hp_ignore_entry_work(hash_code, function_name);
     if (profile_curr) {
         if (execute_data != NULL) {
+            /* Record the definition file before the trace callback may
+             * rename the symbol. hp_record_function_file() is a no-op (one
+             * pointer check) unless the file map exists, i.e. unless
+             * xhprof.collect_files=1 in a hierarchical run. */
+            hp_record_function_file(function_name, execute_data->func);
             function_name = hp_get_trace_callback(function_name, execute_data);
         }
 

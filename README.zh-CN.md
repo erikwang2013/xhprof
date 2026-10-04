@@ -126,6 +126,7 @@ xhprof.output_dir = /tmp/xhprof
 |xhprof.sampling_interval  | 100000 | >= v2.* |采样分析器使用的采样间隔，单位为微秒|
 |xhprof.sampling_depth  | INT_MAX | >= v2.* |采样分析器追踪调用链的最大深度|
 |xhprof.collect_additional_info  | 0 | >= v2.1 |采集 mysql_query、curl_exec 的内部信息。默认值为 0，开启值为 1|
+|xhprof.collect_files  | 0 | >= v2.3.16 |记录每个被剖析用户函数的定义文件与行号（内部函数没有）。设为 1 时 run 文件带 `"__files__"` 映射：报告在函数名旁显示 `file:line`，`format=json` 导出为 `"files"`。代价：每次被剖析调用一次哈希查找（约 30ns，约为剖析自身开销的一成），run 文件每函数约增 100 字节|
 |xhprof.profiler  | 1 | >= v2.3.12 |System（只能写 php.ini / `-d`）。设为 0 时扩展仍加载但不注册任何 observer/proxy：空闲开销回落到未加载扩展的水平；此时 `xhprof_enable()` / `xhprof_sample_enable()` 返回 false 并抛出 `E_WARNING`|
 |xhprof.auto_enable  | 0 | >= v2.3.12 |System。请求启动即自动开启分层剖析，无需调用 `xhprof_enable()`（需 `xhprof.profiler=1`；为 0 时静默不生效）|
 |xhprof.auto_enable_flags  | 0 | >= v2.3.12 |System。`xhprof.auto_enable` 使用的 flags，如 `XHPROF_FLAGS_CPU \| XHPROF_FLAGS_MEMORY`|

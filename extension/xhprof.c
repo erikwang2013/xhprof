@@ -136,6 +136,15 @@ PHP_INI_ENTRY("xhprof.output_dir", "", PHP_INI_ALL, NULL)
  */
 STD_PHP_INI_ENTRY("xhprof.collect_additional_info", "0", PHP_INI_ALL, OnUpdateBool, collect_additional_info, zend_xhprof_globals, xhprof_globals)
 
+/*
+ * collect_files
+ * Record the file (and declaration line) every profiled user function is
+ * defined in; the map is attached to the profile data as "__files__" when
+ * profiling stops. The default is 0: enabling it costs one hash lookup per
+ * profiled call and grows every run file by the size of the map.
+ */
+STD_PHP_INI_ENTRY("xhprof.collect_files", "0", PHP_INI_ALL, OnUpdateBool, collect_files, zend_xhprof_globals, xhprof_globals)
+
 /* sampling_interval:
  * Sampling interval to be used by the sampling profiler, in microseconds.
  */
@@ -224,6 +233,7 @@ PHP_FUNCTION(xhprof_disable)
 {
     if (XHPROF_G(enabled)) {
         hp_stop();
+        hp_attach_file_map();
         RETURN_ZVAL(&XHPROF_G(stats_count), 1, 0);
     }
     /* else null is returned */
@@ -271,6 +281,7 @@ static void php_xhprof_init_globals(zend_xhprof_globals *xhprof_globals)
     xhprof_globals->entries = NULL;
     xhprof_globals->root = NULL;
     xhprof_globals->trace_callbacks = NULL;
+    xhprof_globals->file_map = NULL;
     xhprof_globals->ignored_functions = NULL;
     xhprof_globals->sampling_interval = XHPROF_DEFAULT_SAMPLING_INTERVAL;
     xhprof_globals->sampling_depth = INT_MAX;
@@ -621,6 +632,7 @@ void hp_init_profiler_state(int level)
     array_init(&XHPROF_G(stats_count));
 
     hp_init_trace_callbacks();
+    hp_init_file_map(level);
 
     /* Call current mode's init cb */
     XHPROF_G(mode_cb).init_cb();
@@ -651,6 +663,12 @@ void hp_clean_profiler_state()
         zend_hash_destroy(XHPROF_G(trace_callbacks));
         FREE_HASHTABLE(XHPROF_G(trace_callbacks));
         XHPROF_G(trace_callbacks) = NULL;
+    }
+
+    if (XHPROF_G(file_map)) {
+        zend_hash_destroy(XHPROF_G(file_map));
+        FREE_HASHTABLE(XHPROF_G(file_map));
+        XHPROF_G(file_map) = NULL;
     }
 
     if (XHPROF_G(root)) {
@@ -918,6 +936,89 @@ void hp_inc_count(zval *counts, char *name, zend_long count)
         zend_hash_str_update(ht, name, strlen(name), &val);
     }
 
+}
+
+/**
+ * Allocate the function-file map for this profiling session. Only
+ * hierarchical runs with xhprof.collect_files=1 get one; when the map is
+ * NULL, hp_record_function_file() is a no-op and no memory is spent on it.
+ */
+void hp_init_file_map(int level)
+{
+    /* Like stats_count, the map survives xhprof_disable() until the request
+     * ends: drop any previous session's map so re-enabling always starts
+     * clean and a session with collecting turned off gets none. */
+    if (XHPROF_G(file_map)) {
+        zend_hash_destroy(XHPROF_G(file_map));
+        FREE_HASHTABLE(XHPROF_G(file_map));
+        XHPROF_G(file_map) = NULL;
+    }
+
+    if (!XHPROF_G(collect_files) || level != XHPROF_MODE_HIERARCHICAL) {
+        return;
+    }
+
+    ALLOC_HASHTABLE(XHPROF_G(file_map));
+
+    if (!XHPROF_G(file_map)) {
+        return;
+    }
+
+    /* values are "file:line" strings, keys are function names */
+    zend_hash_init(XHPROF_G(file_map), 128, NULL, ZVAL_PTR_DTOR, 0);
+}
+
+/**
+ * Remember where a profiled function is defined. Called on every profiled
+ * call; the common case is a single hash probe that hits (a function's file
+ * is recorded the first time it is seen). Internals and the load::/eval::
+ * compile hooks have no definition file of their own and are skipped.
+ */
+void hp_record_function_file(zend_string *function_name, zend_function *func)
+{
+    zval file;
+
+    if (XHPROF_G(file_map) == NULL || func == NULL ||
+        func->type != ZEND_USER_FUNCTION || func->op_array.filename == NULL) {
+        return;
+    }
+
+    if (zend_hash_exists(XHPROF_G(file_map), function_name)) {
+        return;
+    }
+
+    ZVAL_STR(&file, strpprintf(0, "%s:%d", ZSTR_VAL(func->op_array.filename),
+                               (int)func->op_array.line_start));
+    zend_hash_add(XHPROF_G(file_map), function_name, &file);
+}
+
+/**
+ * Attach the function-file map to the profile data as "__files__" before it
+ * is returned by xhprof_disable(). The reporting layer strips the key again
+ * in get_run(), so no report computation ever sees it.
+ */
+void hp_attach_file_map()
+{
+    zend_string *name;
+    zval *file;
+    zval files;
+
+    if (XHPROF_G(file_map) == NULL ||
+        zend_hash_num_elements(XHPROF_G(file_map)) == 0 ||
+        Z_TYPE(XHPROF_G(stats_count)) != IS_ARRAY) {
+        return;
+    }
+
+    array_init(&files);
+    ZEND_HASH_FOREACH_STR_KEY_VAL(XHPROF_G(file_map), name, file) {
+        if (name != NULL && file != NULL) {
+            Z_TRY_ADDREF_P(file);
+            zend_hash_add(Z_ARRVAL(files), name, file);
+        }
+    } ZEND_HASH_FOREACH_END();
+
+    zend_hash_str_update(Z_ARRVAL(XHPROF_G(stats_count)), "__files__",
+                         sizeof("__files__") - 1, &files);
 }
 
 /**

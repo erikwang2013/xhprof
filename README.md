@@ -126,6 +126,7 @@ xhprof.output_dir = /tmp/xhprof
 |xhprof.sampling_interval  | 100000 | >= v2.* | Sampling interval to be used by the sampling profiler, in microseconds|
 |xhprof.sampling_depth  | INT_MAX | >= v2.* | Depth to trace call-chain by the sampling profiler|
 |xhprof.collect_additional_info  | 0 | >= v2.1 | Collect mysql_query, curl_exec internal info. The default is 0. Open value is 1|
+|xhprof.collect_files  | 0 | >= v2.3.16 | Record the file and declaration line of every profiled user function (internals get none). With 1 the run file carries a `"__files__"` map: the report shows `file:line` next to each function name and `format=json` exports it under `"files"`. Costs one hash lookup per profiled call (~30ns, about a tenth of the profiler's own overhead) and ~100 bytes per function in the run file|
 |xhprof.profiler  | 1 | >= v2.3.12 | System (php.ini / `-d` only). Set to 0 to load the extension without registering any observer/proxy: idle overhead drops back to non-extension levels, but `xhprof_enable()` / `xhprof_sample_enable()` then return false with an `E_WARNING`|
 |xhprof.auto_enable  | 0 | >= v2.3.12 | System. Start hierarchical profiling at request start without calling `xhprof_enable()` (requires `xhprof.profiler=1`; silently inert when it is 0)|
 |xhprof.auto_enable_flags  | 0 | >= v2.3.12 | System. Flags used by `xhprof.auto_enable`, e.g. `XHPROF_FLAGS_CPU \| XHPROF_FLAGS_MEMORY`|

@@ -149,6 +149,11 @@ if ($format === 'json') {
                          'description' => $description,
                          'metrics' => $metrics,
                          'totals' => $totals,
+                         // function => "file:line", or null when the run
+                         // was profiled without xhprof.collect_files
+                         'files' => method_exists($xhprof_runs_impl, 'get_run_files')
+                                    ? $xhprof_runs_impl->get_run_files($run, $source)
+                                    : null,
                          'functions' => $flat_data),
                    JSON_INVALID_UTF8_SUBSTITUTE);
   return;

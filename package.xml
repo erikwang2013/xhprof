@@ -41,10 +41,10 @@
   <active>yes</active>
  </lead>
  <date>2026-10-04</date>
- <time>02:45:00</time>
+ <time>12:17:22</time>
  <version>
-  <release>2.3.15</release>
-  <api>2.3.15</api>
+  <release>2.3.16</release>
+  <api>2.3.16</api>
  </version>
  <stability>
   <release>stable</release>
@@ -52,13 +52,24 @@
  </stability>
  <license uri="http://www.apache.org/licenses/LICENSE-2.0.html">Apache 2.0</license>
  <notes>
-    - Fix CSV exports (report.php?format=csv) on PHP 7.2 and 7.3: the
-      empty-string escape argument passed to fputcsv() is only supported
-      since PHP 7.4; older versions reject it and produced an empty
-      download. Older versions now use the classic backslash escape.
-    - Verified on a real php:7.2-cli container: CSV output byte-identical
-      to 8.5 and the report-layer suite passes 135/135 there.
-    - Everything else is identical to 2.3.14.
+    - New: opt-in function source map. With xhprof.collect_files=1 the
+      extension records the file and declaration line of every profiled
+      user function (functions, methods and closures; internals and the
+      load::/eval:: entries carry no file of their own). The map travels
+      with the run file as "__files__"; the reporting layer strips it on
+      read (get_run() output is unchanged, get_run_files() serves it),
+      shows "file:line" next to the function name in the flat,
+      parent-child and single-function views, and exports it under
+      "files" in format=json. Runs profiled without the setting simply
+      have no map and no extra UI.
+    - The setting defaults to 0: while enabled, each profiled call pays
+      one hash lookup to remember the file - measured at ~30ns per call
+      (+11% on top of the profiler's own overhead in a tight call loop);
+      a run file grows by the map, ~100 bytes per distinct function.
+    - New extension test xhprof_026.phpt covers the collection, the
+      recursion/base-name keying and the opt-in behavior; the extension
+      suite passes 26/26 and the report-layer suite 156/156 on PHP 8.5.
+    - Everything else is identical to 2.3.15.
  </notes>
  <contents>
   <dir name="/">
@@ -107,6 +118,7 @@
    <file name="extension/tests/xhprof_023.phpt" role="test" />
    <file name="extension/tests/xhprof_024.phpt" role="test" />
    <file name="extension/tests/xhprof_025.phpt" role="test" />
+   <file name="extension/tests/xhprof_026.phpt" role="test" />
    <file name="tests/php/report_layer_test.php" role="test" />
    <file name="extension/config.m4" role="src" />
    <file name="extension/config.w32" role="src" />
@@ -158,6 +170,26 @@
  <providesextension>xhprof</providesextension>
  <extsrcrelease />
  <changelog>
+   <release>
+      <date>2026-10-04</date>
+      <version>
+       <release>2.3.16</release>
+       <api>2.3.16</api>
+      </version>
+      <stability>
+       <release>stable</release>
+       <api>stable</api>
+      </stability>
+      <notes>
+       - New opt-in xhprof.collect_files (default 0): record each
+         profiled user function's definition "file:line", carried in run
+         files as "__files__" and shown next to function names in the
+         reports (flat / parent-child / single function) and exported by
+         format=json. Costs ~30ns per profiled call while enabled.
+         Everything else identical to 2.3.15.
+      </notes>
+   </release>
+
    <release>
       <date>2026-10-04</date>
       <version>

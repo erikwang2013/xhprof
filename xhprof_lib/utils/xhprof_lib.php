@@ -307,6 +307,13 @@ function xhprof_sanitize_run_data($raw_data) {
     return $raw_data;
   }
 
+  // The extension's function => "file:line" map (xhprof.collect_files) is
+  // not a function entry. Reports that read run files directly, without
+  // going through get_run() (the bin/ CLIs, and any custom reader that
+  // sanitizes), must not mistake it for one. get_run() already strips the
+  // key before sanitizing; dropping it again here is a no-op there.
+  unset($raw_data['__files__']);
+
   // the metrics main() carries are the ones the report looks up on
   // every entry.
   $metrics = array();

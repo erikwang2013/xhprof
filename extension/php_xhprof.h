@@ -43,7 +43,7 @@ extern zend_module_entry xhprof_module_entry;
  */
 
 /* XHProf version                           */
-#define XHPROF_VERSION       "2.3.15"
+#define XHPROF_VERSION       "2.3.16"
 
 #define XHPROF_FUNC_HASH_COUNTERS_SIZE   1024
 
@@ -190,6 +190,10 @@ static inline void hp_array_del(zend_string **names);
 
 void hp_init_trace_callbacks();
 
+void hp_init_file_map(int level);
+void hp_record_function_file(zend_string *function_name, zend_function *func);
+void hp_attach_file_map();
+
 double get_timebase_conversion();
 
 hp_ignored_functions *hp_ignored_functions_init(zval *values);
@@ -257,6 +261,15 @@ ZEND_BEGIN_MODULE_GLOBALS(xhprof)
     double timebase_conversion;
 
     zend_bool collect_additional_info;
+
+    /* xhprof.collect_files: record the file (and line) each profiled user
+     * function is defined in. Dumped as "__files__" into the profile data
+     * by hp_attach_file_map() when profiling stops. */
+    zend_bool collect_files;
+
+    /* function name => "file:line" map for the current session; allocated
+     * by hp_init_file_map() only when collecting is enabled (see above) */
+    HashTable *file_map;
 
     /* xhprof.profiler: when 0 the profiler is not instrumented at all and
      * neither xhprof_enable() nor xhprof_sample_enable() can start it */

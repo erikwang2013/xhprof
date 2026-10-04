@@ -100,6 +100,12 @@ $runs->save_run($plain, 'xhprof', 'my.run.1');
 $runs->save_run($plain, 'test', 'my.run.2');
 $runs->save_run($plain, 'xhprof', 'legacyid');
 
+// a run carrying the extension's function => "file:line" map (__files__,
+// collected with xhprof.collect_files=1)
+$files_map = array('alpha' => '/app/alpha.php:3',
+                   'beta' => '/app/lib/beta.php:9');
+$runs->save_run($hier + array('__files__' => $files_map), 'xhprof', 'f11e0001');
+
 // --- sample run folding ---
 
 same(array('', 'main()'), xhprof_parse_parent_child('main()'),
@@ -172,6 +178,37 @@ ok(strpos($dot, 'samples (') !== false, 'sample labels carry their unit');
 ok(strpos($dot, 'total calls') === false,
    'no fabricated call counts for a run without ct');
 no_notices('sampled callgraph');
+
+// --- function file map (__files__): collected by xhprof.collect_files ---
+
+$with_files = $runs->get_run('f11e0001', 'xhprof', $desc);
+ok(!array_key_exists('__files__', $with_files),
+   'get_run strips the function file map');
+same($runs->get_run('ae0001', 'xhprof', $desc), $with_files,
+     'a file map does not change how the run itself reads back');
+same($files_map, $runs->get_run_files('f11e0001', 'xhprof'),
+     'get_run_files returns the map');
+same(null, $runs->get_run_files('ae0001', 'xhprof'),
+     'runs without a file map return null');
+same(null, $runs->get_run_files('ffff0001', 'xhprof'),
+     'a missing run has no file map');
+same($hier, xhprof_sanitize_run_data($hier + array('__files__' => $files_map)),
+     'sanitize drops the file map too (bin/ CLIs read run files directly)');
+no_notices('reading a run with a file map');
+
+// display helper: map lookup, recursion suffixes, name-embedded sources
+same('/app/alpha.php:3', xhprof_symbol_file($files_map, 'alpha'), 'map hit');
+same('/app/alpha.php:3', xhprof_symbol_file($files_map, 'alpha@2'),
+     'a recursion variant resolves to its base entry');
+same('', xhprof_symbol_file($files_map, 'strlen'), 'unknown symbol has no file');
+same('', xhprof_symbol_file($files_map, 'main()'), 'main() has no file');
+same('', xhprof_symbol_file(null, 'alpha'), 'no map at all');
+same('/tmp/x.php:12', xhprof_symbol_file(array(), '{closure:/tmp/x.php:12}'),
+     'closures name their file themselves (PHP >= 8.4)');
+same('tmp/inc.php', xhprof_symbol_file(array(), 'load::tmp/inc.php'),
+     'include entries name their file');
+same('', xhprof_symbol_file(array(), '{closure}'),
+     'a bare {closure} (PHP < 8.4) has no file without the map');
 
 // --- degenerate run data ---
 
@@ -470,6 +507,10 @@ if (function_exists('shell_exec')) {
   same(8, $json['totals']['ct'], 'json call count total sums every entry');
   same(array('wt', 'cpu', 'mu'), $json['metrics'],
        'json instrumented metrics');
+  same(null, $json['files'], 'json files is null for a run without a map');
+
+  $json = json_decode(report_php($root, $dir, 'f11e0001', 'json'), true);
+  same($files_map, $json['files'], 'json export carries the function file map');
 
   $lines = preg_split('/\r?\n/', trim(report_php($root, $dir, '5a3d0001', 'csv')));
   // the download may start with a UTF-8 BOM (spreadsheets want it)
