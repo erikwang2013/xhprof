@@ -58,12 +58,12 @@
   <path d="M252 78 C 228 128 168 166 148 240 C 132 300 130 344 150 380 C 172 448 340 448 362 380 C 382 344 380 300 364 242 C 342 168 284 132 268 104 C 262 90 258 82 252 78 Z" fill="url(#body)"/>
 
   
-  <ellipse cx="216" cy="300" rx="15" ry="19" fill="#4A1D0D"/>
-  <circle cx="210" cy="291" r="5.8" fill="#fff"/>
-  <circle cx="221" cy="308" r="2.6" fill="#fff" opacity=".8"/>
-  <ellipse cx="296" cy="300" rx="15" ry="19" fill="#4A1D0D"/>
-  <circle cx="290" cy="291" r="5.8" fill="#fff"/>
-  <circle cx="301" cy="308" r="2.6" fill="#fff" opacity=".8"/>
+  
+  
+  
+  
+  
+  
   <ellipse cx="184" cy="340" rx="20" ry="11" fill="#F693A6" opacity=".9"/>
   <ellipse cx="328" cy="340" rx="20" ry="11" fill="#F693A6" opacity=".9"/>
-  <path d="M244 334 Q 256 346 268 334" fill="none" stroke="#4A1D0D" stroke-width="5" stroke-linecap="round"/></g><g class="ex-face"><ellipse cx="256" cy="310" rx="62" ry="48" fill="url(#body)"/><path d="M 201.75,304.2 Q 216,282.75 230.25,304.2" fill="none" stroke="#4A1D0D" stroke-width="3" stroke-linecap="round"/><path class="ex-anim-pulse" style="animation-delay:0s" d="M 296,305.99 C 279.94,293.7 286.87,282.36 296,292.44 C 305.13,282.36 312.06,293.7 296,305.99 Z" fill="#FF7AA2"/><ellipse cx="256" cy="333" rx="6.34" ry="5.94" fill="none" stroke="#4A1D0D" stroke-width="2.4"/><ellipse class="ex-anim-pulse" cx="204.75" cy="320.25" rx="11.7" ry="6.3" fill="#F693A6" opacity="0.7"/><ellipse class="ex-anim-pulse" cx="307.25" cy="320.25" rx="11.7" ry="6.3" fill="#F693A6" opacity="0.7"/><path class="ex-anim-heart" style="animation-delay:0.0s" d="M 198.88,254.01 C 188.17,245.82 192.79,238.26 198.88,244.98 C 204.97,238.26 209.59,245.82 198.88,254.01 Z" fill="#FF7AA2"/><path class="ex-anim-heart" style="animation-delay:0.7s" d="M 317.88,241.25 C 309.46,234.82 313.09,228.88 317.88,234.16 C 322.67,228.88 326.3,234.82 317.88,241.25 Z" fill="#FF7AA2"/><path class="ex-anim-heart" style="animation-delay:1.3s" d="M 298.84,275.99 C 293.03,271.54 295.53,267.44 298.84,271.08 C 302.15,267.44 304.65,271.54 298.84,275.99 Z" fill="#FF7AA2"/></g></g></svg>
+  </g><g class="ex-face"><path d="M 201.75,304.2 Q 216,282.75 230.25,304.2" fill="none" stroke="#4A1D0D" stroke-width="3" stroke-linecap="round"/><path class="ex-anim-pulse" style="animation-delay:0s" d="M 296,305.99 C 279.94,293.7 286.87,282.36 296,292.44 C 305.13,282.36 312.06,293.7 296,305.99 Z" fill="#FF7AA2"/><ellipse cx="256" cy="333" rx="6.34" ry="5.94" fill="none" stroke="#4A1D0D" stroke-width="2.4"/><ellipse class="ex-anim-pulse" cx="204.75" cy="320.25" rx="11.7" ry="6.3" fill="#F693A6" opacity="0.7"/><ellipse class="ex-anim-pulse" cx="307.25" cy="320.25" rx="11.7" ry="6.3" fill="#F693A6" opacity="0.7"/><path class="ex-anim-heart" style="animation-delay:0.0s" d="M 198.88,254.01 C 188.17,245.82 192.79,238.26 198.88,244.98 C 204.97,238.26 209.59,245.82 198.88,254.01 Z" fill="#FF7AA2"/><path class="ex-anim-heart" style="animation-delay:0.7s" d="M 317.88,241.25 C 309.46,234.82 313.09,228.88 317.88,234.16 C 322.67,228.88 326.3,234.82 317.88,241.25 Z" fill="#FF7AA2"/><path class="ex-anim-heart" style="animation-delay:1.3s" d="M 298.84,275.99 C 293.03,271.54 295.53,267.44 298.84,271.08 C 302.15,267.44 304.65,271.54 298.84,275.99 Z" fill="#FF7AA2"/></g></g></svg>
